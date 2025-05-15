@@ -1,0 +1,864 @@
+# 1 import data for literature review----
+
+library(ggmice)
+library(visdat)
+library(naniar)
+library(ggplot2)
+library(ggmap)
+library(readxl)
+library(ggpubr)
+library(stringr)
+library(psych)
+library(dplyr)
+library(plyr)
+library(tidyverse)
+library(reshape2)
+library(leaflet)
+library(readxl)
+library(writexl)
+library(grid)
+library(patchwork)
+library(coin)
+library(DescTools)
+library(lattice)
+library(dunn.test)
+library(car)
+library(mice)
+library(VIM)
+library(randomForest)
+library(hydroGOF)
+library(caret)
+# to run this model, you must set all of your file paths to extract the correct dataframe and send results
+# data frame and file names retained from original, please use to avoid issues
+file_path <- "C:/Users//Lit_review_data.xlsx"
+data <-read_excel(file_path, sheet = 'ForR.2')
+colnames(data)
+data$Observation <- as.integer(data$Observation)
+data$Study <- as.integer(data$Study)
+data$VegType <- factor(data$VegType, levels = c("Bamboo", "Broadleaf", "Conifer"))
+is.factor(data$VegType)
+print(data$Prefecture)
+#########################
+# list mapping prefectures to regions
+prefecture_to_region <- list(
+  "Hokkaido" = "Hokkaido",
+  "Aomori" = "Tohoku", "Iwate" = "Tohoku", "Miyagi" = "Tohoku", "Akita" = "Tohoku", "Yamagata" = "Tohoku", "Fukushima" = "Tohoku",
+  "Ibaraki" = "Kanto", "Tochigi" = "Kanto", "Gunma" = "Kanto", "Saitama" = "Kanto", "Chiba" = "Kanto", "Tokyo" = "Kanto", "Kanagawa" = "Kanto",
+  "Niigata" = "Chubu", "Toyama" = "Chubu", "Ishikawa" = "Chubu", "Fukui" = "Chubu", "Yamanashi" = "Chubu", "Nagano" = "Chubu", "Gifu" = "Chubu", "Shizuoka" = "Chubu", "Aichi" = "Chubu",
+  "Mie" = "Kinki", "Shiga" = "Kinki", "Kyoto" = "Kinki", "Osaka" = "Kinki", "Hyogo" = "Kinki", "Nara" = "Kinki", "Wakayama" = "Kinki",
+  "Tottori" = "Chugoku", "Shimane" = "Chugoku", "Okayama" = "Chugoku", "Hiroshima" = "Chugoku", "Yamaguchi" = "Chugoku",
+  "Tokushima" = "Shikoku", "Kagawa" = "Shikoku", "Ehime" = "Shikoku", "Kochi" = "Shikoku",
+  "Fukuoka" = "Kyushu", "Saga" = "Kyushu", "Nagasaki" = "Kyushu", "Kumamoto" = "Kyushu", "Oita" = "Kyushu", "Miyazaki" = "Kyushu", "Kagoshima" = "Kyushu",
+  "Okinawa" = "Okinawa"
+)
+region_names <- c("Hokkaido", "Tohoku", "Kanto", "Kansai","Chubu", "Kinki", "Chugoku", "Shikoku", "Kyushu", "Okinawa")
+# A new column for regions based on the prefecture
+data$Region <- sapply(data$Prefecture, function(pref) {
+  if (pref %in% region_names) {
+    return(pref)  # Directly use the region name if Prefecture is a region
+  } else if (!is.null(prefecture_to_region[[pref]])) {
+    return(prefecture_to_region[[pref]])  # Map the prefecture to its region
+  } else {
+    return(NA)  # If unmapped, this returns NA
+  }
+})
+
+# Region as factor
+data$Region <- as.factor(data$Region)
+head(data)
+
+
+data$Region <- as.character(data$Region)
+head(data$Region)
+data$Region <- factor(data$Region)
+is.factor(data$Region)
+compare <- data.frame(Prefecture = data$Prefecture, Region = data$Region)
+data$elevation[data$elevation <0]=0
+
+data$scaled_elevation <- scale(data$elevation)
+data$scaled_Rainfall <- scale(data$annual_rainfall)
+data$scaled_temp <- scale(data$mean_temp)
+
+# This creates a dataframe combining coordinates, elevation, and region
+coords_elevation_region <- data.frame(
+  Temp = data$scaled_temp,
+  Rainfall =  data$scaled_Rainfall
+)
+
+num_clusters <- 3  # Adjust best cluster
+
+# Apply K-means clustering
+set.seed(184)  
+kmeans_result <- kmeans(coords_elevation_region, centers = num_clusters)
+data$Cluster <- kmeans_result$cluster
+
+head(data$Cluster)
+# Create a scatter plot of clustering results
+ggplot(data, aes(x = Eastings, y = Northings, color = factor(Cluster))) +
+  geom_point(size = 2) +
+  scale_color_discrete(name = "Cluster") +
+  labs(title = "K-means Clustering Results", x = "Eastings", y = "Northings") +
+  theme_minimal()
+library(dplyr)
+
+
+set.seed(123)
+wss <- sapply(1:10, function(k) {
+  kmeans(coords_elevation_region, centers = k, nstart = 25)$tot.withinss
+})
+plot(1:10, wss, type = "b", pch = 19, frame = FALSE, 
+     xlab = "Number of clusters K", ylab = "Total within-clusters sum of squares")
+###########
+cluster_1_data <- data %>%
+  filter(Cluster == 1)
+cluster_2_data <- data %>%
+  filter(Cluster == 2)
+cluster_3_data <- data %>%
+  filter(Cluster == 3)
+# 
+n_obs_cluster_1 <- nrow(cluster_1_data)
+n_obs_cluster_2 <- nrow(cluster_2_data)
+n_obs_cluster_3 <- nrow(cluster_3_data)
+# Combine counts into a data frame
+obs_summary <- data.frame(
+  Cluster = c("Cluster 1", "Cluster 2", "Cluster 3"),
+  Observations = c(n_obs_cluster_1, n_obs_cluster_2, n_obs_cluster_3)
+)
+print(obs_summary)
+cluster_1_means <- apply(cluster_1_data[, c("annual_rainfall", "mean_temp")], 2, mean)
+cluster_2_means <- apply(cluster_2_data[, c("annual_rainfall", "mean_temp")], 2, mean)
+cluster_3_means <- apply(cluster_3_data[, c("annual_rainfall", "mean_temp")], 2, mean)
+
+
+# Combine means into a single table
+summary_table_means <- data.frame(
+  Cluster = c("Cluster 1", "Cluster 2", "Cluster 3"),
+  Annual_Rainfall = c(cluster_1_means["annual_rainfall"], cluster_2_means["annual_rainfall"], cluster_3_means["annual_rainfall"]),
+  Mean_Temperature = c(cluster_1_means["mean_temp"], cluster_2_means["mean_temp"], cluster_3_means["mean_temp"])
+)
+
+print(summary_table_means)
+# 
+koppen_climate_types_means <- data.frame(
+  Cluster = summary_table_means$Cluster,
+  Koppen_Type = c("Cfa1", "Cfb", "Cfa2")
+)
+
+# Print the Koppen climate types for each cluster
+print(koppen_climate_types_means)
+
+#convert some columns to factors----
+factors <-c("Observation","Study","Author","Prefecture", "City", "CoordsN","CoordsE")#these columns will now be factors
+
+variables <- c("Northings", "Eastings","Managed", "Selective_cut", "Shoots_dug", "Clear_cut", "Mix_bamboo", "Mix_trees", "Expansion",
+               "Other_bamboo", "Forest", "Conifer", "Broadleaf", "MixedForest", "VegType","mean_temp", "annual_rainfall", "elevation",
+               "SOC_Tha", "SOC_10cm_px", "SOC_20cm_px","SOC_30cmV","pH","N_Tha","N_px", "Soil_water_vv" ,"BD_Tha","Tree_DBH","Culm_densityStha",
+               "DBHcm","Culmheight_m","Basal_areaM2ha","ABG_biomassTha", "CulmTha","RootTha","RhizomeTha","BG_biomassTha","LitterfallThayr",
+               "Dead_materialTha","Dead_basal_areaM2ha","ABG_C_stock","BGbiomassTCha","NPPtotal_Tha_yr","NPP_ABG_Tha_yr","NPP_BG_Tha_yr",
+               "NPP_rhizome_Tha_yr","NPP_root_Tha_yr","NEE_Tcha_yr","NEP_Tcha_yr",  
+               "GPP_Tcha_yr","Soil_resp_TCO2ha_yr","Soil_resp_Tcha_yr","Reco","transpiration","Region","Cluster",
+               "ABG_kgNha" , "Litter_kgNha","Nuptake_kgNha_yr" ,"BG_biomassNkhha","LeafSi_kgha","BranchSi_kgha","CulmSi_kgha","RootSi_kgha","RhizomeSi_kgha",
+               "TotalSi_kgha")
+
+    
+data_original <- data
+data[factors] <- lapply(data[factors], as.factor)
+cols_to_keep <- c(factors, variables)
+data <- data[ , cols_to_keep]
+
+duplicates <- colnames(data)[duplicated(colnames(data))]
+print(duplicates)
+
+numeric_columns <- colnames(data)[sapply(data, is.numeric) & !colnames(data) %in% variables]
+data$Northings <- as.numeric(as.character(data$Northings))
+data$Eastings <- as.numeric(as.character(data$Eastings))
+#######################################################----
+library(MASS)
+class(data$VegType)
+levels(as.factor(data$VegType))
+library(dplyr)
+library(forcats)
+# Convert VegType values to numeric
+data <- data %>%
+  mutate(VegType = fct_recode(VegType, "1" = "Bamboo", "2" = "Broadleaf", "3" = "Conifer")) %>%
+  mutate(VegType = as.numeric(as.character(VegType)))
+is.factor(data$VegType)
+
+# Original combined dataframe 
+Factor_columns <- c("Managed", "Selective_cut", "Shoots_dug", 
+                    "Clear_cut", "Mix_bamboo", "Mix_trees", "Expansion", "Other_bamboo", "Forest", 
+                    "Conifer", "Broadleaf", "MixedForest", "VegType", "Cluster")
+for (col in Factor_columns) {
+  data[[col]] <- as.factor(data[[col]])
+}
+is.factor(data$VegType)
+
+naniar::vis_miss(data)# visualize data to see which columns might be usable
+colnames(data)
+data <- data[order(data$Forest), ]
+# since methods vary, split the data into two subsets
+bamboo_data <- data[data$Forest == 0, ]
+forest_data <- data[data$Forest == 1, ]
+# remove where total is less than 10% of total
+bamboo_inclusion_threshold <-nrow(data) * 0.0
+forest_inclusion_threshold <-nrow(data) * 0.0
+bamboo_data <- bamboo_data[, colSums(!is.na(bamboo_data)) >= bamboo_inclusion_threshold]
+forest_data <- forest_data[, colSums(!is.na(forest_data)) >= forest_inclusion_threshold]
+colnames(bamboo_data)
+colnames(forest_data)
+naniar::vis_miss(bamboo_data)
+naniar::vis_miss(forest_data)
+str(bamboo_data)
+str(forest_data)
+
+all_column_names <- c("Observation", "Study", "Author", "Prefecture", "City", "CoordsN", 
+                  "CoordsE", "Northings", "Eastings", "Managed", "Selective_cut", "Shoots_dug", 
+                  "Clear_cut", "Mix_bamboo", "Mix_trees", "Expansion", "Other_bamboo", "Forest", 
+                  "Conifer", "Broadleaf", "MixedForest", "VegType", "mean_temp", "annual_rainfall", 
+                  "elevation", "SOC_Tha","SOC_10cm_px" ,"pH", "N_Tha","N_px","BD_Tha","Soil_water_vv", "Tree_DBH", "Culm_densityStha", 
+                  "DBHcm", "Culmheight_m", "Basal_areaM2ha", "ABG_biomassTha", "CulmTha", "RootTha", 
+                  "RhizomeTha", "BG_biomassTha", "LitterfallThayr", "Dead_materialTha", "ABG_C_stock", 
+                  "BGbiomassTCha", "NPPtotal_Tha_yr", "NPP_ABG_Tha_yr", "NPP_BG_Tha_yr", "transpiration","Region", "Cluster",
+                  "ABG_kgNha" , "Litter_kgNha","Nuptake_kgNha_yr" ,"BG_biomassNkhha","LeafSi_kgha","BranchSi_kgha","CulmSi_kgha","RootSi_kgha","RhizomeSi_kgha",
+                  "TotalSi_kgha")
+
+
+ABG_columns <- c("Northings", "Eastings", "Managed", "Selective_cut", "Shoots_dug", 
+                 "Clear_cut", "Mix_bamboo", "Mix_trees", "Expansion", "Other_bamboo", "Forest", 
+                 "Conifer", "Broadleaf", "MixedForest", "VegType", "mean_temp", "annual_rainfall", 
+                 "elevation","Tree_DBH", "Culm_densityStha","DBHcm", "Culmheight_m", "Basal_areaM2ha", 
+                 "ABG_biomassTha", "CulmTha","LitterfallThayr", "Dead_materialTha", "ABG_C_stock",
+                 "ABG_kgNha" , "Litter_kgNha","LeafSi_kgha","BranchSi_kgha","CulmSi_kgha","Cluster")
+
+
+
+BG_columns <- c("Northings", "Eastings", "Managed", "Selective_cut", "Shoots_dug", 
+                "Clear_cut", "Mix_bamboo", "Mix_trees", "Expansion", "Other_bamboo", "Forest", 
+                "Conifer", "Broadleaf", "MixedForest", "VegType", "mean_temp", "annual_rainfall", 
+                "elevation","SOC_Tha","SOC_10cm_px","pH", "Soil_water_vv","N_Tha","N_px","BD_Tha","RootTha","RhizomeTha", "BG_biomassTha",
+                "BGbiomassTCha", "NPPtotal_Tha_yr", "NPP_ABG_Tha_yr", "NPP_BG_Tha_yr", "Soil_resp_Tcha_yr", "Soil_resp_TCO2ha_yr",
+                "GPP_Tcha_yr","Reco","transpiration","NEE_Tcha_yr","NEP_Tcha_yr",
+                "Nuptake_kgNha_yr" ,"BG_biomassNkhha","RootSi_kgha","RhizomeSi_kgha",
+                "TotalSi_kgha","Cluster")
+
+subset_valid_columns <- function(data, columns) { 
+     valid_columns <- columns[columns %in% colnames(data)] 
+     return(data[, valid_columns]) 
+     }
+
+
+
+# Define aboveground variables from bamboo data
+bamboo_data_aboveground <- subset_valid_columns(bamboo_data, ABG_columns)
+forest_data_aboveground <- subset_valid_columns(forest_data, ABG_columns)
+colnames(bamboo_data_aboveground)
+colnames(forest_data_aboveground)
+
+bamboo_data_belowground <- subset_valid_columns(bamboo_data, BG_columns)
+forest_data_belowground <- subset_valid_columns(forest_data, BG_columns)
+colnames(bamboo_data_belowground)
+colnames(forest_data_belowground)
+
+levels(bamboo_data_aboveground$Cluster)
+is.factor(bamboo_data_aboveground$Cluster)
+
+levels(forest_data_aboveground$Cluster)
+is.factor(forest_data_aboveground$Cluster)
+# Check the distribution of Cluster levels
+table(bamboo_data_aboveground$Cluster)
+table(forest_data_aboveground$Cluster)
+##### random forests imputation object
+is.factor(bamboo_data_aboveground$VegType)
+
+# Define methods for aboveground imputation
+aboveground_methods_bamboo <- make.method(bamboo_data_aboveground)
+aboveground_methods_bamboo[] <- "rf"
+
+meth <- make.method(bamboo_data_aboveground)
+pred <- make.predictorMatrix(bamboo_data_aboveground)
+pred2 <- quickpred(bamboo_data_aboveground, mincor = 0.7)
+plot_pred(pred2,method = meth, square = FALSE)
+
+predictor_matrix_bamboo <- quickpred(bamboo_data_aboveground, mincor = 0.7)
+aboveground_methods_forest <- make.method(forest_data_aboveground)
+aboveground_methods_forest[] <- "rf"
+
+aboveground_methods_forest[names(aboveground_methods_forest) == "ABG_biomassTha"] <- "rf"
+predictor_matrix_forest <- quickpred(forest_data_aboveground, mincor = 0.5)
+predictor_matrix_forest["ABG_biomassTha", ] <- 0
+predictor_matrix_forest["ABG_biomassTha", c("Tree_DBH", "Culmheight_m", "Basal_areaM2ha")] <- 1
+print(predictor_matrix_forest)
+# MICE imputation for aboveground variables 
+mice_aboveground_bamboo <- mice(bamboo_data_aboveground, m = 20, method = aboveground_methods_bamboo, 
+                                predictorMatrix = predictor_matrix_bamboo, maxit = 100, seed = 184)
+plot_trace(mice_aboveground_bamboo)
+
+mice_aboveground_forest <- mice(forest_data_aboveground, m = 20, method = aboveground_methods_forest,
+                                predictorMatrix = predictor_matrix_forest, maxit = 100, seed = 184)
+plot_trace(mice_aboveground_forest)
+####################################################################################################
+mice_aboveground_bamboo_list <- list()
+for (i in 1:20) {
+  mice_aboveground_bamboo_list[[i]] <- complete(mice_aboveground_bamboo, i)
+}
+##
+array_data_aboveground_bamboo <- array(unlist(mice_aboveground_bamboo_list), 
+                            dim = c(nrow(mice_aboveground_bamboo_list[[1]]), ncol(mice_aboveground_bamboo_list[[1]]), 20))
+averaged_aboveground_bamboo <- apply(array_data_aboveground_bamboo, c(1, 2), mean)
+averaged_aboveground_bamboo <- as.data.frame(averaged_aboveground_bamboo)
+colnames(averaged_aboveground_bamboo) <- colnames(mice_aboveground_bamboo[[1]])
+print(head(averaged_aboveground_bamboo))
+imputed_bamboo_aboveground <- averaged_aboveground_bamboo
+##
+mice_aboveground_forest_list <- list()
+for (i in 1:20) {
+  mice_aboveground_forest_list[[i]] <- complete(mice_aboveground_forest, i)
+}
+##
+array_data_aboveground_forest <- array(unlist(mice_aboveground_forest_list), 
+                            dim = c(nrow(mice_aboveground_forest_list[[1]]), ncol(mice_aboveground_forest_list[[1]]), 20))
+averaged_aboveground_forest <- apply(array_data_aboveground_forest, c(1, 2), mean)
+averaged_aboveground_forest <- as.data.frame(averaged_aboveground_forest)
+colnames(averaged_aboveground_forest) <- colnames(mice_aboveground_forest[[1]])
+print(head(averaged_aboveground_forest))
+imputed_forest_aboveground <- averaged_aboveground_forest
+####################################################################################################
+
+
+summary(imputed_bamboo_aboveground) 
+summary(imputed_forest_aboveground)
+
+ABG_columns_bamboo <- colnames(imputed_bamboo_aboveground)
+BG_columns_bamboo <- colnames(bamboo_data_belowground)
+common_columns_bamboo <- intersect(ABG_columns_bamboo, BG_columns_bamboo)
+
+ABG_columns_forest <- colnames(imputed_forest_aboveground)
+BG_columns_forest <- colnames(forest_data_belowground)
+common_columns_forest <- intersect(ABG_columns_forest, BG_columns_forest)
+library(dplyr)
+# Select columns from the belowground dataframe excluding duplicates
+bamboo_data_belowground_selected <- dplyr::select(bamboo_data_belowground, -one_of(common_columns_bamboo))
+forest_data_belowground_selected <- dplyr::select(forest_data_belowground, -one_of(common_columns_forest))
+
+# This merges imputed aboveground data with belowground data
+merged_bamboo_data <- cbind(imputed_bamboo_aboveground, bamboo_data_belowground_selected)
+merged_forest_data <- cbind(imputed_forest_aboveground, forest_data_belowground_selected)
+
+
+# Function to identify columns with few observations
+identify_sparse_columns <- function(data, threshold = 5) {
+  sparse_columns <- colnames(data)[apply(data, 2, function(col) sum(!is.na(col)) < threshold)]
+  return(sparse_columns)
+}
+
+# Identify sparse columns in bamboo and forest datasets
+sparse_columns_bamboo <- identify_sparse_columns(merged_bamboo_data)
+sparse_columns_forest <- identify_sparse_columns(merged_forest_data)
+
+# Print the sparse columns for review
+print(sparse_columns_bamboo)
+print(sparse_columns_forest)
+
+# Exclude sparse columns from the bamboo and forest datasets
+merged_bamboo_data <- merged_bamboo_data[, !colnames(merged_bamboo_data) %in% sparse_columns_bamboo]
+merged_forest_data <- merged_forest_data[, !colnames(merged_forest_data) %in% sparse_columns_forest]
+
+
+belowground_methods_bamboo <- make.method(merged_bamboo_data)
+belowground_methods_bamboo[names(belowground_methods_bamboo) %in% BG_columns] <- "rf"
+predictor_matrix_bamboo_combined <- quickpred(merged_bamboo_data, mincor = 0.8)
+belowground_methods_forest <- make.method(merged_forest_data)
+belowground_methods_forest[names(belowground_methods_forest) %in% BG_columns] <- "rf"
+predictor_matrix_forest_combined <- quickpred(merged_forest_data, mincor = 0.4)
+
+# Perform MICE imputation for combined data #
+mice_bamboo_combined <- mice(merged_bamboo_data, m = 20, method = belowground_methods_bamboo,
+                             predictorMatrix = predictor_matrix_bamboo_combined, maxit = 100, seed = 184)
+plot_trace(mice_bamboo_combined)
+mice_forest_combined <- mice(merged_forest_data, m = 20, method = belowground_methods_forest,
+                             predictorMatrix = predictor_matrix_forest_combined, maxit = 100, seed = 184)
+plot_trace(mice_forest_combined)
+
+mice_belowground_bamboo_list <- list()
+for (i in 1:20) {
+  mice_belowground_bamboo_list[[i]] <- complete(mice_bamboo_combined, i)
+}
+##
+array_data_belowground_bamboo <- array(unlist(mice_belowground_bamboo_list), 
+                                       dim = c(nrow(mice_belowground_bamboo_list[[1]]), ncol(mice_belowground_bamboo_list[[1]]), 20))
+averaged_belowground_bamboo <- apply(array_data_belowground_bamboo, c(1, 2), mean)
+averaged_belowground_bamboo <- as.data.frame(averaged_belowground_bamboo)
+colnames(averaged_belowground_bamboo) <- colnames(mice_bamboo_combined[[1]])
+print(head(averaged_belowground_bamboo))
+imputed_bamboo <- averaged_belowground_bamboo
+##
+mice_belowground_forest_list <- list()
+for (i in 1:20) {
+  mice_belowground_forest_list[[i]] <- complete(mice_forest_combined, i)
+}
+##
+array_data_belowground_forest <- array(unlist(mice_belowground_forest_list), 
+                                       dim = c(nrow(mice_belowground_forest_list[[1]]), ncol(mice_belowground_forest_list[[1]]), 20))
+averaged_belowground_forest <- apply(array_data_belowground_forest, c(1, 2), mean)
+averaged_belowground_forest <- as.data.frame(averaged_belowground_forest)
+colnames(averaged_belowground_forest) <- colnames(mice_forest_combined[[1]])
+print(head(averaged_belowground_forest))
+imputed_forest <- averaged_belowground_forest
+##################
+ # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+methods_bamboo_2 <- make.method(imputed_bamboo)
+methods_bamboo_2[] <- "rf"
+predictor_matrix_bamboo_2 <- quickpred(imputed_bamboo, mincor = 0.8)
+
+methods_forest_2 <- make.method(imputed_forest)
+methods_forest_2[] <- "rf"
+predictor_matrix_forest_2 <- quickpred(imputed_forest, mincor = 0.8)
+
+
+
+# Perform 2nd MICE imputation for aboveground variables 
+bamboo_2 <- mice(imputed_bamboo, m = 20, method = methods_bamboo_2, 
+                 predictorMatrix = predictor_matrix_bamboo_2, maxit = 100, seed = 184)
+plot_trace(bamboo_2)
+# Impute forest data using the forest-specific methods and predictor matrix
+forest_2 <- mice(imputed_forest, m = 20, method = methods_forest_2,
+                 predictorMatrix = predictor_matrix_forest_2, maxit = 100, seed = 184)
+plot_trace(forest_2)
+mice__bamboo_2_list <- list()
+for (i in 1:20) {
+  mice__bamboo_2_list[[i]] <- complete(bamboo_2, i)
+}
+##
+array_data_bamboo_2 <- array(unlist(mice__bamboo_2_list), 
+                             dim = c(nrow(mice__bamboo_2_list[[1]]), ncol(mice__bamboo_2_list[[1]]), 20))
+averaged_bamboo_2 <- apply(array_data_bamboo_2, c(1, 2), mean)
+averaged_bamboo_2 <- as.data.frame(averaged_bamboo_2)
+colnames(averaged_bamboo_2) <- colnames(bamboo_2[[1]])
+print(head(averaged_bamboo_2))
+imputed_bamboo2 <- averaged_bamboo_2
+##
+mice__forest_2_list <- list()
+for (i in 1:20) {
+  mice__forest_2_list[[i]] <- complete(forest_2, i)
+}
+##
+array_data_forest_2 <- array(unlist(mice__forest_2_list), 
+                             dim = c(nrow(mice__forest_2_list[[1]]), ncol(mice__forest_2_list[[1]]), 20))
+averaged_forest_2 <- apply(array_data_forest_2, c(1, 2), mean)
+averaged_forest_2 <- as.data.frame(averaged_forest_2)
+colnames(averaged_forest_2) <- colnames(forest_2[[1]])
+print(head(averaged_forest_2))
+imputed_forest2 <- averaged_forest_2
+####################################################################################################
+
+
+
+write.csv(imputed_bamboo2, "C:/Users//Results_tables/imputed_bamboo2.csv", row.names = FALSE)
+write.csv(imputed_forest2, "C:/Users//Results_tables/imputed_forest2.csv", row.names = FALSE)
+
+
+
+
+################################# impute remainder (test to see how it looks) ######################
+
+methods_bamboo_3 <- make.method(imputed_bamboo2)
+methods_bamboo_3[] <- "rf"
+predictor_matrix_bamboo_3 <- quickpred(imputed_bamboo2, mincor = 0.8)
+
+print(dim(predictor_matrix_bamboo_3)) 
+print(dim(imputed_bamboo2))
+# Print the method vector to check its length and contents
+print(length(methods_bamboo_3))
+print(methods_bamboo_3)
+print(predictor_matrix_bamboo_3)
+
+
+methods_forest_3 <- make.method(imputed_forest2)
+methods_forest_3[] <- "rf"
+predictor_matrix_forest_3 <- quickpred(imputed_forest2, mincor = 0.6)
+
+
+# from here, no new data was imputed, but these lines were written during development, 
+# and although redundant, object names would need to be changed, so it was easier to leave them in place
+# Perform 2nd MICE imputation for aboveground variables 
+bamboo_3 <- mice(imputed_bamboo2, m = 20, method = methods_bamboo_3, 
+                 predictorMatrix = predictor_matrix_bamboo_3, maxit = 100, seed = 184)
+plot_trace(bamboo_3)
+# Impute forest data using the forest-specific methods and predictor matrix
+forest_3 <- mice(imputed_forest2, m = 20, method = methods_forest_3,
+                 predictorMatrix = predictor_matrix_forest_3, maxit = 100, seed = 184)
+plot_trace(forest_3)
+
+mice__bamboo_3_list <- list()
+for (i in 1:20) {
+  mice__bamboo_3_list[[i]] <- complete(bamboo_3, i)
+}
+##
+array_data_bamboo_3 <- array(unlist(mice__bamboo_3_list), 
+                             dim = c(nrow(mice__bamboo_3_list[[1]]), ncol(mice__bamboo_3_list[[1]]), 20))
+averaged_bamboo_3 <- apply(array_data_bamboo_3, c(1, 2), mean)
+averaged_bamboo_3 <- as.data.frame(averaged_bamboo_3)
+colnames(averaged_bamboo_3) <- colnames(bamboo_3[[1]])
+print(head(averaged_bamboo_3))
+imputed_bamboo3 <- averaged_bamboo_3
+##
+mice__forest_3_list <- list()
+for (i in 1:20) {
+  mice__forest_3_list[[i]] <- complete(forest_3, i)
+}
+##
+array_data_forest_3 <- array(unlist(mice__forest_3_list), 
+                             dim = c(nrow(mice__forest_3_list[[1]]), ncol(mice__forest_3_list[[1]]), 20))
+averaged_forest_3 <- apply(array_data_forest_3, c(1, 2), mean)
+averaged_forest_3 <- as.data.frame(averaged_forest_3)
+colnames(averaged_forest_3) <- colnames(forest_3[[1]])
+print(head(averaged_forest_3))
+imputed_forest3 <- averaged_forest_3
+####################################################################################################
+write.csv(imputed_bamboo3, "C:/Users//Results_tables/imputed_bamboo3.csv", row.names = FALSE)
+write.csv(imputed_forest3, "C:/Users//Results_tables/imputed_forest3.csv", row.names = FALSE)
+
+
+
+#######################################################################################
+# Convert specified columns to factors
+Factor_columns <- c("Managed", "Selective_cut", "Shoots_dug", 
+                    "Clear_cut", "Mix_bamboo", "Mix_trees", "Expansion", "Other_bamboo", "Forest", 
+                    "Conifer", "Broadleaf", "MixedForest", "VegType", "Cluster")
+
+imputed_bamboo3[Factor_columns] <- lapply(imputed_bamboo3[Factor_columns], as.factor)
+imputed_forest3[Factor_columns] <- lapply(imputed_forest3[Factor_columns], as.factor)
+str(imputed_bamboo3)
+str(imputed_forest3)
+##################            Cross-validation section       #####################
+# remove columns uneeded for cross-validation
+columns_to_remove <- c("Northings", "Eastings", "mean_temp", "annual_rainfall", "elevation", "Cluster")
+# Select only numeric columns and remove specified columns in imputed_bamboo
+imputed_bamboo_filtered <- imputed_bamboo3[, sapply(imputed_bamboo3, is.numeric)]
+imputed_bamboo_filtered <- imputed_bamboo_filtered[, !(names(imputed_bamboo_filtered) %in% columns_to_remove)]
+imputed_forest_filtered <- imputed_forest3[, sapply(imputed_forest3, is.numeric)]
+imputed_forest_filtered <- imputed_forest_filtered[, !(names(imputed_forest_filtered) %in% columns_to_remove)]
+
+#  verify 
+str(imputed_bamboo_filtered)
+str(imputed_forest_filtered)
+# Check for NA's in imputed_bamboo_filtered
+na_counts_bamboo_filtered <- colSums(is.na(imputed_bamboo_filtered))
+print(na_counts_bamboo_filtered)
+
+# Check for NA's in imputed_forest_filtered
+na_counts_forest_filtered <- colSums(is.na(imputed_forest_filtered))
+print(na_counts_forest_filtered)
+
+
+cv_bamboo <- imputed_bamboo_filtered[, colSums(is.na(imputed_bamboo_filtered)) == 0]
+cv_forest <- imputed_forest_filtered[, colSums(is.na(imputed_forest_filtered)) == 0]
+
+str(cv_bamboo)
+str(cv_forest)
+
+#########################################
+library(caret)
+library(Metrics)  # For RMSE and MAE
+library(hydroGOF)  # For pBias
+library(PerformanceAnalytics)  # For Kendall's Tau
+
+# Define the custom summary function
+custom_summary <- function(data, lev = NULL, model = NULL) {
+  RMSE_value <- RMSE(data$obs, data$pred)
+  MAE_value <- MAE(data$obs, data$pred)
+  Kendall_tau <- cor(data$obs, data$pred, method = "kendall")
+  pBias_value <- hydroGOF::pbias(data$obs, data$pred)
+  
+  out <- c(RMSE = RMSE_value, MAE = MAE_value, KendallTau = Kendall_tau, pBias = pBias_value)
+  return(out)
+}
+
+# set seed and train control
+set.seed(184)
+train_control <- trainControl(method = "cv", number = 10, summaryFunction = custom_summary)
+
+# Initialize lists to store results
+results_data_bamboo <- list()
+results_data_forest <- list()
+
+# Performs CV for each column in the bamboo dataset
+for (target_col in colnames(cv_bamboo)) {
+  model <- train(as.formula(paste(target_col, "~ .")), data = cv_bamboo, method = "glm", trControl = train_control)
+  results_data_bamboo[[target_col]] <- model$results
+}
+
+# Performs CV for each column in the forest dataset
+for (target_col in colnames(cv_forest)) {
+  model <- train(as.formula(paste(target_col, "~ .")), data = cv_forest, method = "glm", trControl = train_control)
+  results_data_forest[[target_col]] <- model$results
+}
+
+# Convert lists to data frames 
+results_df_bamboo <- do.call(rbind, lapply(names(results_data_bamboo), function(variable) {
+  data.frame(
+    Variable = variable,
+    RMSE = results_data_bamboo[[variable]]$RMSE,
+    MAE = results_data_bamboo[[variable]]$MAE,
+    KendallTau = results_data_bamboo[[variable]]$KendallTau,
+    pBias = results_data_bamboo[[variable]]$pBias,
+    Dataset = "bamboo",
+    stringsAsFactors = FALSE
+  )
+}))
+
+results_df_forest <- do.call(rbind, lapply(names(results_data_forest), function(variable) {
+  data.frame(
+    Variable = variable,
+    RMSE = results_data_forest[[variable]]$RMSE,
+    MAE = results_data_forest[[variable]]$MAE,
+    KendallTau = results_data_forest[[variable]]$KendallTau,
+    pBias = results_data_forest[[variable]]$pBias,
+    Dataset = "forest",
+    stringsAsFactors = FALSE
+  )
+}))
+
+# Define performance categories. These thresholds are from Forster et al. 2022
+performance_categories <- list(
+  MAE = c(1.9, 2.9, 3.9, 4.0),
+  RMSE = c(10, 19, 39, 40),
+  KendallTau = c(0.3, 0.5, 0.7, 1.0),
+  pBias = c(1, 2.5, 3, 3.5)
+)
+
+performance_labels <- list(
+  MAE = c("Excellent", "Good", "Fair", "Poor"),
+  RMSE = c("Excellent", "Good", "Fair", "Poor"),
+  KendallTau = c("Poor", "Fair", "Good", "Excellent"),
+  pBias = c("Excellent", "Good", "Fair", "Poor")
+)
+
+categorize_performance <- function(value, categories, labels) {
+  for (i in seq_along(categories)) {
+    if (value <= categories[i]) {
+      return(labels[i])
+    }
+  }
+  return(labels[length(labels)])
+}
+
+category_scores <- list(
+  MAE = c(Excellent = 4, Good = 3, Fair = 2, Poor = 1),
+  RMSE = c(Excellent = 4, Good = 3, Fair = 2, Poor = 1),
+  KendallTau = c(Excellent = 4, Good = 3, Fair = 2, Poor = 1),
+  pBias = c(Excellent = 4, Good = 3, Fair = 2, Poor = 1)
+)
+
+results_df_bamboo$MAE_Category <- sapply(results_df_bamboo$MAE, categorize_performance, performance_categories$MAE, performance_labels$MAE)
+results_df_bamboo$RMSE_Category <- sapply(results_df_bamboo$RMSE, categorize_performance, performance_categories$RMSE, performance_labels$RMSE)
+results_df_bamboo$KendallTau_Category <- sapply(results_df_bamboo$KendallTau, categorize_performance, performance_categories$KendallTau, performance_labels$KendallTau)
+results_df_bamboo$pBias_Category <- sapply(results_df_bamboo$pBias, categorize_performance, performance_categories$pBias, performance_labels$pBias)
+
+results_df_forest$MAE_Category <- sapply(results_df_forest$MAE, categorize_performance, performance_categories$MAE, performance_labels$MAE)
+results_df_forest$RMSE_Category <- sapply(results_df_forest$RMSE, categorize_performance, performance_categories$RMSE, performance_labels$RMSE)
+results_df_forest$KendallTau_Category <- sapply(results_df_forest$KendallTau, categorize_performance, performance_categories$KendallTau, performance_labels$KendallTau)
+results_df_forest$pBias_Category <- sapply(results_df_forest$pBias, categorize_performance, performance_categories$pBias, performance_labels$pBias)
+
+results_df_bamboo$MAE_Score <- sapply(results_df_bamboo$MAE_Category, function(x) category_scores$MAE[[x]])
+results_df_bamboo$RMSE_Score <- sapply(results_df_bamboo$RMSE_Category, function(x) category_scores$RMSE[[x]])
+results_df_bamboo$KendallTau_Score <- sapply(results_df_bamboo$KendallTau_Category, function(x) category_scores$KendallTau[[x]])
+results_df_bamboo$pBias_Score <- sapply(results_df_bamboo$pBias_Category, function(x) category_scores$pBias[[x]])
+
+results_df_forest$MAE_Score <- sapply(results_df_forest$MAE_Category, function(x) category_scores$MAE[[x]])
+results_df_forest$RMSE_Score <- sapply(results_df_forest$RMSE_Category, function(x) category_scores$RMSE[[x]])
+results_df_forest$KendallTau_Score <- sapply(results_df_forest$KendallTau_Category, function(x) category_scores$KendallTau[[x]])
+results_df_forest$pBias_Score <- sapply(results_df_forest$pBias_Category, function(x) category_scores$pBias[[x]])
+
+results_df_bamboo$Average_Score <- rowMeans(results_df_bamboo[, c("MAE_Score", "RMSE_Score", "KendallTau_Score", "pBias_Score")], na.rm = TRUE)
+results_df_forest$Average_Score <- rowMeans(results_df_forest[, c("MAE_Score", "RMSE_Score", "KendallTau_Score", "pBias_Score")], na.rm = TRUE)
+
+# Print the results with the average scores
+print(results_df_bamboo)
+print(results_df_forest)
+
+write.csv(results_df_bamboo, "C:/Users//Results_tables/bamboo_cross_validation.csv", row.names = FALSE)
+write.csv(results_df_forest, "C:/Users//Results_tables/forest_cross_validation.csv", row.names = FALSE)
+
+
+poor_performers_bamboo <- results_df_bamboo[results_df_bamboo$Average_Score < 2, ]
+
+print(poor_performers_bamboo)
+poor_performers_forest <- results_df_forest[results_df_forest$Average_Score < 2, ]
+print(poor_performers_forest)
+
+summary(imputed_bamboo3)
+summary(imputed_forest3)
+# Remove columns with NA values
+bamboo3_no_NAs <- imputed_bamboo3[, colSums(is.na(imputed_bamboo3)) == 0]
+forest3_no_NAs <- imputed_forest3[, colSums(is.na(imputed_forest3)) == 0]
+write.csv(bamboo3_no_NAs, "C:/Users//Results_tables/bamboo3_no_NAs.csv", row.names = FALSE)
+write.csv(forest3_no_NAs, "C:/Users//Results_tables/forest3_no_NAs.csv", row.names = FALSE)
+summary(bamboo3_no_NAs)
+summary(forest3_no_NAs)
+
+columns_dataset1 <- names(bamboo3_no_NAs) 
+columns_dataset2 <- names(forest3_no_NAs)
+common_columns <- intersect(columns_dataset1, columns_dataset2)
+
+
+
+# Subset to include only the common columns
+bamboo_data_common <- bamboo3_no_NAs %>% dplyr::select(all_of(common_columns))
+forest_data_common <- forest3_no_NAs %>% dplyr::select(all_of(common_columns))
+
+# Bind by row
+combined_data <- bind_rows(bamboo_data_common, forest_data_common)
+
+# View summary to check
+summary(combined_data)
+
+write.csv(combined_data, "C:/Users//Results_tables/combined_imputed.csv", row.names = FALSE)
+
+
+
+################  Plots   ##########################################################
+
+# Add Dataset column
+bamboo_data$Dataset <- "Original"
+cv_bamboo$Dataset <- "Imputed"
+
+forest_data$Dataset <- "Original"
+cv_forest$Dataset <- "Imputed"
+# Print column names of both datasets
+print(colnames(bamboo_data))
+print(colnames(cv_bamboo))
+
+# Columns to exclude
+exclude_columns <- c("Northings", "Eastings", "mean_temp", "annual_rainfall", "elevation","Tree_DBH")
+
+# Find common columns and exclude specified columns
+common_columns <- setdiff(intersect(colnames(bamboo_data), colnames(cv_bamboo)), exclude_columns)
+
+print(common_columns)
+
+# Filter the bamboo data to include only common columns
+filtered_bamboo_data <- bamboo_data %>% dplyr::select(all_of(common_columns))
+aligned_cv_bamboo <- cv_bamboo %>% dplyr::select(all_of(common_columns))
+
+joined_bamboo <- rbind(filtered_bamboo_data, aligned_cv_bamboo)
+joined_bamboo <- as.data.frame(joined_bamboo)
+melted_bamboo <- melt(joined_bamboo, id.vars = "Dataset")
+
+# Columns to exclude
+exclude_columns_forest <- c("Northings", "Eastings", "mean_temp", "annual_rainfall", "elevation")  # Adjust as needed
+
+# Find common columns
+common_columns_forest <- setdiff(intersect(colnames(forest_data), colnames(cv_forest)), exclude_columns_forest)
+
+print(common_columns_forest)
+# Filter both datasets to include only the common columns
+filtered_forest_data <- forest_data %>% dplyr::select(all_of(common_columns_forest))
+filtered_cv_forest <- cv_forest %>% dplyr::select(all_of(common_columns_forest))
+joined_forest <- rbind(filtered_forest_data, filtered_cv_forest)
+joined_forest <- as.data.frame(joined_forest)
+melted_forest <- melt(joined_forest, id.vars = "Dataset")
+########################
+head(melted_bamboo)
+head(melted_forest)
+
+# Function to create boxplots for supplimentary 
+create_density_plots <- function(data, variables) {
+  plot_list <- list()
+  for (var in variables) {
+    if (var %in% unique(data$variable)) {
+      p <- ggplot(subset(data, variable == var), aes(x = value, fill = Dataset)) +
+        geom_density(alpha = 0.5) +
+        labs(title = var, x = "Values", y = "Density") +
+        theme_minimal() +
+        scale_fill_manual(values = c("Original" = "blue", "Imputed" = "red")) +
+        theme(legend.position = "right")
+      plot_list[[var]] <- p
+    }
+  }
+  return(plot_list)
+}
+
+# Create box plots function for supplimentary
+create_boxplots <- function(data, variables) {
+  plot_list <- list()
+  for (var in variables) {
+    if (var %in% unique(data$variable)) {
+      p <- ggplot(subset(data, variable == var), aes(x = Dataset, y = value, fill = Dataset)) +
+        geom_boxplot(alpha = 0.5) +
+        labs(title = var, x = "Dataset", y = "Values") +
+        theme_minimal() +
+        scale_fill_manual(values = c("Original" = "blue", "Imputed" = "red")) +
+        theme(legend.position = "right")
+      plot_list[[var]] <- p
+    }
+  }
+  return(plot_list)
+}
+
+library(ggplot2)
+
+create_violinplots <- function(data, variables) {
+  plot_list <- list()
+  for (var in variables) {
+    if (var %in% unique(data$variable)) {
+      p <- ggplot(subset(data, variable == var), aes(x = Dataset, y = value, fill = Dataset)) +
+        geom_violin(alpha = 0.5) +
+        geom_boxplot(width = 0.4, position = position_dodge(0.8), outlier.shape = NA) +  # Increased boxplot width
+        labs(title = var, x = "Dataset", y = "Values") +
+        theme_minimal() +
+        scale_fill_manual(values = c("Original" = "lightblue", "Imputed" = "red")) +
+        theme(legend.position = "right")
+      plot_list[[var]] <- p
+    }
+  }
+  return(plot_list)
+}
+
+
+
+
+bamboo_variables_filtered <- unique(melted_bamboo$variable)
+forest_variables_filtered <- unique(melted_forest$variable)
+
+density_plots_bamboo <- create_density_plots(melted_bamboo, bamboo_variables_filtered)
+box_plots_bamboo <- create_boxplots(melted_bamboo, bamboo_variables_filtered)
+violin_plots_bamboo <- create_violinplots(melted_bamboo, bamboo_variables_filtered)
+
+library(ggpubr)
+
+# Density plots for supplementary data
+arranged_density_plots_bamboo <- ggarrange(plotlist = density_plots_bamboo, ncol = 5, nrow = ceiling(length(density_plots_bamboo) / 5), 
+                                           common.legend = TRUE, legend = "right")
+print(arranged_density_plots_bamboo)
+
+arranged_box_plots_bamboo <- ggarrange(plotlist = box_plots_bamboo, ncol = 5, nrow = ceiling(length(box_plots_bamboo) / 5), 
+                                       common.legend = TRUE, legend = "right")
+print(arranged_box_plots_bamboo)
+
+arranged_violin_plots_bamboo <- ggarrange(plotlist = violin_plots_bamboo, ncol = 5, nrow = ceiling(length(violin_plots_bamboo) / 5), 
+                                       common.legend = TRUE, legend = "right")
+print(arranged_violin_plots_bamboo)
+
+
+density_plots_forest <- create_density_plots(melted_forest, forest_variables_filtered)
+box_plots_forest <- create_boxplots(melted_forest, forest_variables_filtered)
+violin_plots_forest <- create_violinplots(melted_forest, forest_variables_filtered)
+
+arranged_density_plots_forest <- ggarrange(plotlist = density_plots_forest, ncol = 5, nrow = ceiling(length(density_plots_forest) / 5), 
+                                           common.legend = TRUE, legend = "right")
+print(arranged_density_plots_forest)
+
+arranged_box_plots_forest <- ggarrange(plotlist = box_plots_forest, ncol = 5, nrow = ceiling(length(box_plots_forest) / 5), 
+                                       common.legend = TRUE, legend = "right")
+print(arranged_box_plots_forest)
+
+
+
+arranged_violin_plots_forest <- ggarrange(plotlist = violin_plots_forest, ncol = 5, nrow = ceiling(length(violin_plots_forest) / 5), 
+                                       common.legend = TRUE, legend = "right")
+print(arranged_violin_plots_forest)
+
+#####
+#    mice and supplimentary plots complete. Go to Analysis Script for statistical treatment
