@@ -1,0 +1,1078 @@
+# script for statistically analysing imputed dataset
+library(ggplot2)
+library(ggmap)
+library(readxl)
+library(ggpubr)
+library(stringr)
+library(psych)
+library(dplyr)
+library(plyr)
+library(tidyverse)
+library(reshape2)
+library(leaflet)
+library(purrr)
+library(writexl)
+library(grid)
+library(patchwork)
+library(coin)
+library(DescTools)
+library(lattice)
+library(dunn.test)
+library(mice)
+library(randomForest)
+library(caret)
+library(hydroGOF)
+library(Hmisc)
+# set your filepaths here to run the script
+file_path <- "C:/Users//Lit_review_data.xlsx"
+file_path2 <- "C:/Users//Results_tables/combined_imputed.csv"
+file_path3 <- "C:/Users//Results_tables/bamboo3_no_NAs.csv"
+data_original <-read_excel(file_path, sheet = 'ForR.2')
+data2 <- read.csv(file_path2, header = T)
+data3 <- read.csv(file_path3, header = T)
+
+colnames(data2)
+data2
+
+# List of categorical variables to encode
+factors <- c("Managed", "Selective_cut", "Shoots_dug", "Clear_cut", "Mix_bamboo", "Mix_trees", 
+             "Expansion", "Other_bamboo", "Forest", "Conifer", "Broadleaf", "Mixed_forest", "VegType","Cluster")
+
+bamboo_data <- data3
+bamboo_data <- data3[data3$VegType == 1, ]# removes the non-bamboo rows from VegType
+forest_data <- data2[data2$Forest == 2, ]
+bamboo_data <- bamboo_data %>% dplyr::select(-Forest, -Tree_DBH)
+forest_data <- forest_data %>% dplyr::select(-Forest, -Managed, -Selective_cut, -Shoots_dug,
+                                             -Clear_cut, -Mix_bamboo, -Mix_trees, -Expansion, -Other_bamboo)
+bamboo_data <- as.data.frame(lapply(bamboo_data, function(x) if(is.character(x)) as.factor(x) else x))
+colnames(bamboo_data)
+# Verify conversion
+sapply(bamboo_data, class)
+# Subset numeric columns from bamboo_data
+numeric_data <- bamboo_data[, sapply(bamboo_data, is.numeric)]
+# Identify columns that are strictly numeric (excluding integers)
+numeric_cols <- names(bamboo_data)[sapply(bamboo_data, is.double)]
+numeric_bamboo <- bamboo_data[, numeric_cols]
+head(numeric_bamboo)
+print(numeric_bamboo)
+
+# Calculate a correlation matrix
+cor_matrix <- cor(numeric_bamboo, use = "complete.obs")
+# Identify columns with standard deviation of zero
+constant_cols <- sapply(numeric_bamboo, function(col) sd(col, na.rm = TRUE) == 0)
+# Print the constant columns
+print(names(numeric_bamboo)[constant_cols])
+
+# Melt correlation matrix and create heatmap
+melted_cor_matrix <- melt(cor_matrix)
+heatmap_plot <- ggplot(data = melted_cor_matrix, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1, 1), space = "Lab", 
+                       name="Correlation") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+                                   size = 10, hjust = 1)) +
+  coord_fixed() +
+  ggtitle("Correlation Heat Map of Bamboo Data")
+
+print(heatmap_plot)
+################## cor matrix & Kendall's Tau
+library(stats)
+numeric_columns <- c("mean_temp","annual_rainfall","elevation","SOC_Tha","SOC_10cm_px","pH","Soil_water_vv","N_px",
+                     "Tree_DBH","DBHcm","Culmheight_m","Basal_areaM2ha","ABG_biomassTha","CulmTha","LeavesTha","Culm_densityStha", 
+                     "Litter_kgNha","LeafSi_kgha","BranchSi_kgha", "CulmSi_kgha",
+                     "RootTha","RhizomeTha","BG_biomassTha","LitterfallThayr","Dead_materialTha","Dead_DBH","ABG_C_stock",
+                     "NPP_ABG_Tha_yr","NPP_BG_Tha_yr","NPPtotal_Tha_yr","LitterTCha","BGbiomassTCha","Soil_resp_TCO2ha_yr", 
+                     "transpiration","BG_biomassNkhha","BD_Tha","RootTha","RhizomeTha")        
+
+colnames(numeric_bamboo)
+# this next section will identify disparities brought on by reanalysis
+missing_names <- setdiff(numeric_columns, colnames(bamboo_data))
+extra_names <- setdiff(colnames(bamboo_data), numeric_columns)
+print(missing_names)
+print(extra_names)
+numeric_columns <- numeric_columns[!numeric_columns %in% missing_names]
+numeric_data <- bamboo_data[, numeric_columns]
+colnames(numeric_data)
+
+# Calculate Spearman's correlation matrix and p-values
+spearman_cor_results <- rcorr(as.matrix(numeric_data), type = "spearman")
+cor_results <- rcorr(as.matrix(numeric_data), type = "spearman")
+spearman_cor_matrix <- cor_results$r
+spearman_p_values <- cor_results$P
+
+# Extract correlation matrix and p-values
+spearman_cor_matrix <- spearman_cor_results$r
+spearman_p_values <- spearman_cor_results$P
+# Create a logical mask for p-values ≤ 0.05
+significant_mask <- spearman_p_values <= 0.05 & (abs(spearman_cor_matrix) > 0.3)
+significant_cor_matrix <- spearman_cor_matrix * significant_mask
+significant_cor_matrix[!significant_mask] <- NA
+# Remove rows and columns where all values are NA 
+significant_cor_matrix <- significant_cor_matrix[rowSums(!is.na(significant_cor_matrix)) > 0, 
+                                                 colSums(!is.na(significant_cor_matrix)) > 0]
+print(significant_cor_matrix)
+# Melt the correlation matrix
+melted_cor_matrix <- melt(significant_cor_matrix)
+
+integer_columns <- sapply(bamboo_data, is.integer)
+bamboo_data[integer_columns] <- lapply(bamboo_data[integer_columns], as.factor)
+str(bamboo_data)
+column_classes <- sapply(bamboo_data, class)
+
+# Print non numeric columns
+non_numeric_columns <- column_classes[column_classes != "numeric"]
+print(non_numeric_columns)
+#Shapiro-Wilk test for normality
+shapiro_results <- sapply(numeric_columns, function(col) {
+  test_result <- shapiro.test(bamboo_data[[col]])
+  return(c(statistic = test_result$statistic, p_value = test_result$p.value))
+})
+# Convert results to a data frame 
+shapiro_results_df <- as.data.frame(t(shapiro_results))
+print(shapiro_results_df)
+# Convert all character variables to factors and all number variables as numeric in bamboo_data
+bamboo_data <- as.data.frame(lapply(bamboo_data, function(x) if(is.character(x)) as.factor(x) else x))
+bamboo_data <- as.data.frame(lapply(bamboo_data, function(x) if(is.integer(x)) as.numeric(x) else x))
+bamboo_data$Cluster <- as.factor(bamboo_data$Cluster)
+# Verify the conversion
+sapply(bamboo_data, class)
+#######################################
+library(dplyr)
+# Function for Wilcoxon Rank-Sum Test
+wilcoxon_test <- function(data, factor_col, numeric_col) {
+  result <- wilcox.test(data[[numeric_col]] ~ data[[factor_col]])
+  return(data.frame(Factor = factor_col, Numeric = numeric_col, p_value = result$p.value))
+}
+colnames(bamboo_data)
+# Convert columns to factors 
+bamboo_data$Managed <- factor(bamboo_data$Managed, levels = c(1,2), labels = c("No Management", "Management"))
+bamboo_data$Selective_cut <- factor(bamboo_data$Selective_cut, levels = c(1,2), labels = c("No Cut", "Selective Cut"))
+bamboo_data$Shoots_dug <- factor(bamboo_data$Shoots_dug, levels = c(1,2), labels = c("No digging", "Shoots Dug"))
+bamboo_data$Clear_cut <- factor(bamboo_data$Clear_cut, levels = c(1,2), labels = c("Not Cut", "Clear Cut"))
+bamboo_data$Mix_bamboo <- factor(bamboo_data$Mix_bamboo, levels = c(1,2), labels = c("Moso Only", "Mixed Bamboos"))
+bamboo_data$Mix_trees <- factor(bamboo_data$Mix_trees, levels = c(1,2), labels = c("Moso only", "Moso/Tree Mixture"))
+bamboo_data$Expansion <- factor(bamboo_data$Expansion, levels = c(1,2), labels = c("No Expansion", "Expansion"))
+bamboo_data$Other_bamboo <- factor(bamboo_data$Other_bamboo, levels = c(1,2), labels = c("Moso", "Other bamboo"))
+bamboo_data <- bamboo_data %>% dplyr::select(-Eastings, -Northings, -annual_rainfall, -Cluster, 
+                                             -Conifer, -Broadleaf, -MixedForest, -VegType)
+
+# Number of iterations for sub sampling. This removes bias bought on by unequal sample sizes 
+n_iterations <- 100
+# Random sub sampling function
+subsample_group <- function(larger_group, smaller_group_size, seed) {
+  set.seed(seed)  # Set seed for reproducibility
+  sample(larger_group, smaller_group_size, replace = FALSE)
+}
+
+# Adapted wilcoxon_test function with multiple runs for reproducibility
+wilcoxon_test_multiple <- function(data, factor_col, numeric_col, n_iterations = n_iterations) {
+  results <- data.frame(Statistic = numeric(0), p_value = numeric(0))
+  
+  for (i in 1:n_iterations) {
+    set.seed(i)  # each iteration has a different seed
+    
+    # Calculate sample sizes
+    sample_size1 <- sum(bamboo_data[[factor_col]] == unique(bamboo_data[[factor_col]])[1], na.rm = T)
+    sample_size2 <- sum(bamboo_data[[factor_col]] == unique(bamboo_data[[factor_col]])[2], na.rm = T)
+    
+    # Calculate sample size ratio
+    sample_size_ratio <- max(sample_size1, sample_size2) / min(sample_size1, sample_size2)
+    
+    # Extract groups based on the factor and numeric columns
+    group1 <- bamboo_data[bamboo_data[[factor_col]] == unique(bamboo_data[[factor_col]])[1], numeric_col, drop = T]
+    group2 <- bamboo_data[bamboo_data[[factor_col]] == unique(bamboo_data[[factor_col]])[2], numeric_col, drop = T]
+    
+    # Ensure all groups are numeric 
+    group1 <- as.numeric(group1) 
+    group2 <- as.numeric(group2)
+    group1 <- na.omit(group1) 
+    group2 <- na.omit(group2)
+    # Skip test if either group has too few non-missing observations
+    if (length(group1) < 3 || length(group2) < 3) {
+      next
+    }
+    
+    # Perform sub sampling if the sample size ratio exceeds 4:1. This avoids uneccesary sub sampling
+    if (sample_size_ratio > 4) {
+      if (length(group1) > length(group2)) {
+        group1 <- subsample_group(group1, length(group2), seed = i)
+      } else {
+        group2 <- subsample_group(group2, length(group1), seed = i)
+      }
+    }
+    
+    # Perform the Wilcoxon Rank-Sum Test
+    test_result <- wilcox.test(group1, group2)
+
+    results <- rbind(results, data.frame(Statistic = test_result$statistic, p_value = test_result$p.value))
+  }
+  
+  # Calculate the most common results out of the 100 tests per variable and group
+  common_statistic <- round(mean(results$Statistic), 2)
+  common_p_value <- round(mean(results$p_value), 4)
+  
+  data.frame( 
+    Factor = factor_col, 
+    Numeric = numeric_col, 
+    Most_Common_Statistic = common_statistic, 
+    Most_Common_p_value = common_p_value, 
+    Sample_Size1 = length(group1), 
+    Sample_Size2 = length(group2)
+  ) 
+}
+
+# Initialize data frame to store results
+test_results <- data.frame()
+
+# Perform Wilcoxon Rank-Sum Tests for each specified factor-numeric pair
+for (factor_col in factors) {
+  if (length(unique(bamboo_data[[factor_col]])) == 2) {
+    for (numeric_col in numeric_cols) {
+      test_results <- rbind(test_results, wilcoxon_test_multiple(bamboo_data, factor_col, numeric_col, n_iterations))
+    }
+  }
+}
+print(test_results)
+write.csv(test_results, "C:/Users//Results_tables/Wilcoxon_results.csv", row.names = F) 
+
+# Filter to keep only significant pairs (p_value <= 0.05)
+significant_results <- test_results %>% filter(Most_Common_p_value <= 0.05)
+nonsignificant_results <- test_results %>% filter(Most_Common_p_value >= 0.05)
+print(significant_results)
+
+
+create_boxplot <- function(df, factor_col, numeric_col, label, y_label) {
+  ggplot(df, aes_string(x = factor_col, y = numeric_col)) +
+    geom_boxplot() +
+    theme_bw() +
+    labs(title = label, x = NULL, y = y_label)
+}
+
+significant_pairs <- list(
+  list("Managed", "NPP_BG_Tha_yr", "a)", "BG NPP (t ha⁻¹/yr⁻¹)"),
+  list("Selective_cut", "NPP_BG_Tha_yr", "b)", "BG NPP (t ha⁻¹/yr⁻¹)"),
+  list("Mix_bamboo", "DBHcm", "c)", "DBH (cm)"),
+  list("Expansion", "DBHcm", "d)", "DBH (cm)"),
+  list("Expansion", "Basal_areaM2ha", "e)", "Basal area (m²/ha⁻¹)"),
+  list("Expansion", "transpiration", "f)", "Transpiration (mm/yr⁻¹)"),
+  list("Other_bamboo", "Culm_densityStha", "g)", "Culm density (stems/ha⁻¹)"),
+  list("Other_bamboo", "DBHcm", "h)", "DBH (cm)"),
+  list("Other_bamboo", "Culmheight_m", "i)", "Culm height (m)")
+)
+
+print(significant_pairs)
+
+# Plots for each significant pair 
+plots <- lapply(significant_pairs, function(pair) create_boxplot(bamboo_data, pair[[1]], pair[[2]], pair[[3]], pair[[4]]))
+
+# Arrange all plots in a single output 
+combined_plots <- ggarrange(plotlist = plots, ncol = 3, nrow = 3)
+print(combined_plots)
+##################### conduct Dunn post-hoc tests
+library(dunn.test)
+
+colnames(data2)
+data2$VegType <- factor(data2$VegType, levels = c(1,2,3), labels = c("Bamboo", "Broadleaf", "Conifer"))
+
+# Verify VegType is a factor and check levels
+print(levels(data2$VegType))
+# Store the results
+results_list <- list()
+
+# Numeric columns to test
+numeric <- c("mean_temp","annual_rainfall","elevation","Culmheight_m","Basal_areaM2ha","ABG_biomassTha","CulmTha",
+             "LitterfallThayr","Dead_materialTha", "ABG_C_stock","SOC_Tha", "pH","Soil_water_vv","N_px","BG_biomassTha","BGbiomassTCha",
+             "NPPtotal_Tha_yr","NPP_ABG_Tha_yr","NPP_BG_Tha_yr")  
+
+print(data2)
+# Loop through each numeric column with Kurskal-Wallis test, Dunn test, and sent results to a dataframe
+for (numeric_col in numeric) {
+  tryCatch({
+    kruskal_test <- kruskal.test(as.formula(paste(numeric_col, "~ VegType")), data = data2)
+    
+    dunn_test <- dunn.test(data2[[numeric_col]], data2$VegType, method = "bonferroni")
+
+    results_list[[numeric_col]] <- list(
+      kruskal_test_statistic = kruskal_test$statistic,
+      kruskal_p_value = kruskal_test$p.value,
+      dunn_comparisons = dunn_test$comparisons,
+      dunn_Z = dunn_test$Z,
+      dunn_P_adjusted = dunn_test$P.adjusted
+    )
+  }, error = function(e) {
+    message(paste("Error in processing:", numeric_col))
+    message(e)
+  })
+}
+
+# Create dataframe
+combined_results_table <- data.frame()
+
+for (numeric_col in names(results_list)) {
+  for (i in 1:length(results_list[[numeric_col]]$dunn_comparisons)) {
+    combined_results_table <- rbind(
+      combined_results_table,
+      data.frame(
+        Response_Variable = numeric_col,
+        Kruskal_Test_Statistic = results_list[[numeric_col]]$kruskal_test_statistic,
+        Kruskal_p_value = results_list[[numeric_col]]$kruskal_p_value,
+        Dunn_Comparison = results_list[[numeric_col]]$dunn_comparisons[i],
+        Dunn_Z_Score = results_list[[numeric_col]]$dunn_Z[i],
+        Dunn_P_Adjusted = results_list[[numeric_col]]$dunn_P_adjusted[i]
+      )
+    )
+  }
+}
+
+# View combined results table
+print(combined_results_table)
+summary(combined_results_table)
+head(combined_results_table)
+
+# Write combined results table to a CSV file
+write.csv(combined_results_table, "C:/Users//Results_tables/Kruskal_Wallis.csv", row.names = FALSE)
+# Perform Kruskal-Wallis test for each numeric variable and store results in a list
+results_list <- lapply(numeric, function(numeric) {
+  kruskal_test <- kruskal.test(as.formula(paste(numeric, "~ VegType")), data = data2)
+  list(statistic = kruskal_test$statistic, p_value = kruskal_test$p.value)
+})
+# Filter significant results
+significant_ks_results <- data.frame(
+  Response_Variable = numeric,
+  Test_Statistic = sapply(results_list, function(result) result$statistic),
+  p_value = sapply(results_list, function(result) result$p_value)
+)
+significant_ks_results <- significant_ks_results[significant_ks_results$p_value <= 0.05, ]
+
+print(significant_ks_results)
+print(combined_results_table)
+
+library(ggplot2)
+library(ggpubr)
+
+# List of significant results by group giving new variable names and letters
+group_1 <- list(
+  list("mean_temp", "Mean temperature (°C)", "a)"),
+  list("annual_rainfall", "Annual rainfall (mm yr⁻¹)", "b)"),
+  list("elevation", "Elevation (m)", "c)"),
+  list("pH", "pH", "d)"),
+  list("Soil_water_vv", "Soil Water (%)", "e)"),
+  list("N_px", "Soil N (%)", "f)")
+)
+
+group_2 <- list(
+  list("Culmheight_m", "Canopy height (m)", "a)"),
+  list("Basal_areaM2ha", "Basal Area (m² ha⁻¹)", "b)"),
+  list("ABG_biomassTha", "Aboveground biomass (t ha⁻¹)", "c)"),
+  list("CulmTha", "Culm/Stem Biomass (m² ha⁻¹)", "d)"),
+  list("LitterfallThayr", "Litterfall (t ha⁻¹ yr⁻¹)", "e)"),
+  list("Dead_materialTha", "Dead Material (m² ha⁻¹)", "f)"),
+  list("ABG_C_stock", "Aboveground C stock (t ha⁻¹)", "g)"),
+  list("BG_biomassTha", "Belowground biomass (t ha⁻¹)", "h)"),
+  list("BGbiomassTCha", "Belowground C (t ha⁻¹)", "i)")
+)
+
+group_3 <- list(
+  list("NPPtotal_Tha_yr", "Total NPP (t ha⁻¹ yr⁻¹)", "a)"),
+  list("NPP_ABG_Tha_yr", "ABG NPP (t ha⁻¹ yr⁻¹)", "b)"),
+  list("NPP_BG_Tha_yr", "BG NPP (t ha⁻¹ yr⁻¹)", "c)")
+)
+
+create_boxplot <- function(df, factor_col, numeric_col, label, letter) {
+  ggplot(df, aes(x = .data[[factor_col]], y = .data[[numeric_col]])) +
+    geom_boxplot() +
+    theme_bw() +
+    labs(title = letter, x = NULL, y = label) +
+    theme(legend.position = "none")
+}
+
+
+# Create plots for significant pairs
+group_1_plots <- lapply(group_1, function(pair) {
+  create_boxplot(data2, "VegType", pair[[1]], pair[[2]], pair[[3]])
+})
+
+group_2_plots <- lapply(group_2, function(pair) {
+  create_boxplot(data2, "VegType", pair[[1]], pair[[2]], pair[[3]])
+})
+
+group_3_plots <- lapply(group_3, function(pair) {
+  create_boxplot(data2, "VegType", pair[[1]], pair[[2]], pair[[3]])
+})
+
+
+# Arrange plots 
+arranged_plots_group_1 <- ggarrange(plotlist = group_1_plots, ncol = 3, nrow = 2)
+arranged_plots_group_2 <- ggarrange(plotlist = group_2_plots, ncol = 3, nrow = 3)
+arranged_plots_group_3 <- ggarrange(plotlist = group_3_plots, ncol = 3, nrow = 1)
+
+# Display plots
+print(arranged_plots_group_1)
+print(arranged_plots_group_2)
+print(arranged_plots_group_3)
+
+
+# GLS and AIC for determining significant variables
+#   Here I want to define target variables
+library(nlme)
+
+set.seed(184) 
+train_indices <- sample(seq_len(nrow(numeric_bamboo)), size = 0.75 * nrow(numeric_bamboo))
+training_set <- numeric_bamboo[train_indices, ]
+testing_set <- numeric_bamboo[-train_indices, ]
+
+training_columns <- colnames(training_set) 
+colnames(training_set)
+testing_columns <- colnames(testing_set)
+print(training_columns) 
+print(testing_columns)
+
+
+gls_ABG_NPP <- gls(NPP_ABG_Tha_yr ~ mean_temp + annual_rainfall + elevation + SOC_Tha + pH + N_px + Culm_densityStha +
+                     Soil_water_vv + Culmheight_m + Basal_areaM2ha + ABG_biomassTha + CulmTha + Dead_materialTha +
+                     LitterfallThayr + BG_biomassTha + Soil_resp_TCO2ha_yr + transpiration + TotalSi_kgha, data = training_set, correlation = corAR1(), method = "ML")
+summary(gls_ABG_NPP)
+
+gls_BG_NPP <- gls(NPP_BG_Tha_yr ~ mean_temp + annual_rainfall + elevation + SOC_Tha + pH + N_px + Culm_densityStha +
+                    Soil_water_vv + Culmheight_m + Basal_areaM2ha + ABG_biomassTha + CulmTha + Dead_materialTha +
+                    LitterfallThayr + BG_biomassTha + Soil_resp_TCO2ha_yr + transpiration + TotalSi_kgha, 
+                  data = training_set, correlation = corAR1(), method = "ML")
+summary(gls_BG_NPP)
+
+gls_total_NPP <- gls(NPPtotal_Tha_yr ~ mean_temp + annual_rainfall + elevation + SOC_Tha + pH + N_px + Culm_densityStha +
+                       Soil_water_vv + Culmheight_m + Basal_areaM2ha + ABG_biomassTha + CulmTha + Dead_materialTha +
+                       LitterfallThayr + BG_biomassTha + Soil_resp_TCO2ha_yr + transpiration + TotalSi_kgha, data = training_set, correlation = corAR1(), method = "ML")
+summary(gls_total_NPP)
+
+gls_SOC <- gls(SOC_Tha ~ mean_temp + annual_rainfall + elevation + pH + N_px + Culm_densityStha +
+                 Soil_water_vv + Culmheight_m + Basal_areaM2ha + ABG_biomassTha + CulmTha + Dead_materialTha +
+                 LitterfallThayr + BG_biomassTha + NPPtotal_Tha_yr +
+                 NPP_ABG_Tha_yr + NPP_BG_Tha_yr + Soil_resp_TCO2ha_yr + transpiration + TotalSi_kgha, data = training_set, correlation = corAR1(), method = "ML")
+summary(gls_SOC)
+
+library(MASS)
+library(hydroGOF)
+# Fit stepwise GLS models
+stepwise_ABG_NPP <- stepAIC(gls_ABG_NPP, direction = "both", k = 2)
+stepwise_BG_NPP <- stepAIC(gls_BG_NPP, direction = "both", k = 2)
+stepwise_total_NPP <- stepAIC(gls_total_NPP, direction = "both", k = 2)
+stepwise_SOC <- stepAIC(gls_SOC, direction = "both", k = 2)
+summary(stepwise_ABG_NPP) 
+summary(stepwise_BG_NPP) 
+summary(stepwise_total_NPP) 
+summary(stepwise_SOC)
+summary_ABG <- summary(stepwise_ABG_NPP)
+summary_BG <- summary(stepwise_BG_NPP)
+summary_total <- summary(stepwise_total_NPP)
+summary_SOC <- summary(stepwise_SOC)
+
+extract_filtered_coefs <- function(model_summary) {
+  coefs <- model_summary$tTable
+  filtered_coefs <- coefs[coefs[, "p-value"] <= 0.05, "Value"]
+  return(abs(filtered_coefs))
+}
+
+# Extract coefficients and absolute values for each model
+coef_ABG <- extract_filtered_coefs(summary_ABG)
+coef_BG <- extract_filtered_coefs(summary_BG)
+coef_total <- extract_filtered_coefs(summary_total)
+coef_SOC <- extract_filtered_coefs(summary_SOC)
+
+# Create data frames with variable names and coefficients
+coef_ABG_df <- data.frame(variable = names(coef_ABG), estimate = coef_ABG)
+coef_BG_df <- data.frame(variable = names(coef_BG), estimate = coef_BG)
+coef_total_df <- data.frame(variable = names(coef_total), estimate = coef_total)
+coef_SOC_df <- data.frame(variable = names(coef_SOC), estimate = coef_SOC)
+
+# Combine data frames
+all_coefs <- rbind(coef_ABG_df, coef_BG_df, coef_total_df, coef_SOC_df)
+
+# Rank variables by their absolute estimates
+ranked_coefs <- all_coefs[order(-all_coefs$estimate), ]
+print(ranked_coefs)
+
+
+############################################################################################
+# Make predictions for each stepwise model on the testing dataset
+predictions_ABG_NPP <- predict(stepwise_ABG_NPP, newdata = testing_set)
+predictions_BG_NPP <- predict(stepwise_BG_NPP, newdata = testing_set)
+predictions_total_NPP <- predict(stepwise_total_NPP, newdata = testing_set)
+predictions_SOC <- predict(stepwise_SOC, newdata = testing_set)
+
+actuals_ABG_NPP <- testing_set$NPP_ABG_Tha_yr
+actuals_BG_NPP <- testing_set$NPP_BG_Tha_yr
+actuals_total_NPP <- testing_set$NPPtotal_Tha_yr
+actuals_SOC <- testing_set$SOC_Tha
+# Calculate performance metrics 
+performance_ABG_NPP <- data.frame(
+  MAE = mae(predictions_ABG_NPP, actuals_ABG_NPP),
+  RMSE = rmse(predictions_ABG_NPP, actuals_ABG_NPP),
+  pbias = pbias(predictions_ABG_NPP, actuals_ABG_NPP),
+  Pearson = cor(predictions_ABG_NPP, actuals_ABG_NPP)
+)
+
+performance_BG_NPP <- data.frame(
+  MAE = mae(predictions_BG_NPP, actuals_BG_NPP),
+  RMSE = rmse(predictions_BG_NPP, actuals_BG_NPP),
+  pbias = pbias(predictions_BG_NPP, actuals_BG_NPP),
+  Pearson = cor(predictions_BG_NPP, actuals_BG_NPP)
+)
+
+performance_total_NPP <- data.frame(
+  MAE = mae(predictions_total_NPP, actuals_total_NPP),
+  RMSE = rmse(predictions_total_NPP, actuals_total_NPP),
+  pbias = pbias(predictions_total_NPP, actuals_total_NPP),
+  Pearson = cor(predictions_total_NPP, actuals_total_NPP)
+)
+
+performance_SOC <- data.frame(
+  MAE = mae(predictions_SOC, actuals_SOC),
+  RMSE = rmse(predictions_SOC, actuals_SOC),
+  pbias = pbias(predictions_SOC, actuals_SOC),
+  Pearson = cor(predictions_SOC, actuals_SOC)
+)
+
+# Combine performance metrics into a single dataframe
+performance_metrics <- list(
+  ABG = performance_ABG_NPP,
+  BG = performance_BG_NPP,
+  Total = performance_total_NPP,
+  SOC = performance_SOC
+)
+
+print(performance_metrics)
+# Convert the list to a single data frame 
+restructured_metrics <- do.call(rbind, 
+                                lapply(names(performance_metrics), 
+                                       function(model) { data.frame(Model = model, 
+                                                                    performance_metrics[[model]]) })) 
+
+print(restructured_metrics)
+# Thresholds here defined in Forster et al. 2022
+performance_categories <- list(
+  MAE = c(1.9, 2.9, 3.9, 4.0),
+  RMSE = c(10, 19, 39, 40),
+  pbias = c(1, 2.5, 3, 3.5),
+  Pearson = c(0.3, 0.5, 0.7, 0.9)
+)
+
+performance_labels <- list(
+  MAE = c("Excellent", "Good", "Fair", "Poor"),
+  RMSE = c("Excellent", "Good", "Fair", "Poor"),
+  pbias = c("Excellent", "Good", "Fair", "Poor"),
+  Pearson = c("Poor", "Fair", "Good", "Excellent")
+)
+
+# Function to categorise metric values
+categorize_performance <- function(value, thresholds, labels, metric) {
+  if(metric == "pbias"){
+    value <- abs(value)# accounts for pBias by giving absolute value
+  }
+  for (i in seq_along(thresholds)) {
+    if (value <= thresholds[i]) return(labels[i])
+  }
+  return(tail(labels, 1))
+}
+
+# Function to categorise performance metrics for a single model
+categorize_metrics <- function(metrics) {
+  data.frame(
+    MAE = categorize_performance(metrics$MAE, performance_categories$MAE, performance_labels$MAE, "MAE"),
+    RMSE = categorize_performance(metrics$RMSE, performance_categories$RMSE, performance_labels$RMSE, "RMSE"),
+    pbias = categorize_performance(metrics$pbias, performance_categories$pbias, performance_labels$pbias, "pbias"),
+    Pearson = categorize_performance(metrics$Pearson, performance_categories$Pearson, performance_labels$Pearson, "Pearson")
+  )
+}
+
+# Apply categorisation to each model
+performance_metrics_categorized <- lapply(performance_metrics, categorize_metrics)
+eval_results_gls <- do.call(rbind, performance_metrics_categorized)
+eval_results_gls$Model <- rownames(eval_results_gls)
+rownames(eval_results_gls) <- NULL
+
+# Reorder columns
+eval_results_gls <- eval_results_gls[, c("Model", "MAE", "RMSE", "pbias", "Pearson")]
+
+GLS_evals <- merge(restructured_metrics, eval_results_gls, by = "Model")
+print(GLS_evals)
+Stepwise_eval_results <- write.csv(GLS_evals, "C:/Users//Results_tables/GLS_model_evaluation_results.csv")
+# Function to extract summary statistics
+extract_summary <- function(model) {
+  summary_model <- summary(model)
+  coef_table <- summary_model$tTable
+  data.frame(
+    Predictor = row.names(coef_table),
+    Estimate = coef_table[, "Value"],
+    Std.Error = coef_table[, "Std.Error"],
+    t.value = coef_table[, "t-value"],
+    p.value = coef_table[, "p-value"]
+  )
+}
+
+# Extract model summaries 
+summary_ABG <- extract_summary(stepwise_ABG_NPP)
+summary_BG <- extract_summary(stepwise_BG_NPP)
+summary_total <- extract_summary(stepwise_total_NPP)
+summary_SOC <- extract_summary(stepwise_SOC)
+# Filter out intercept terms from summaries
+remove_intercepts <- function(summary_data) {
+  summary_data <- summary_data[!grepl("Intercept", summary_data$Predictor), ]
+  return(summary_data)
+}
+
+summary_ABG <- remove_intercepts(summary_ABG)
+summary_BG <- remove_intercepts(summary_BG)
+summary_total <- remove_intercepts(summary_total)
+summary_SOC <- remove_intercepts(summary_SOC)
+
+print(summary_ABG)
+print(summary_BG)
+print(summary_total)
+print(summary_SOC)
+# Add a column to identify the model
+summary_ABG$model <- "ABG_NPP"
+summary_BG$model <- "BG_NPP"
+summary_total$model <- "total_NPP"
+summary_SOC$model <- "SOC"
+
+# Combine all summaries into one data frame
+all_summaries <- rbind(summary_ABG, summary_BG, summary_total, summary_SOC)
+# Filter rows significant p-valus
+all_sig_summaries <- all_summaries[all_summaries$p.value <= 0.05, ]
+
+print(all_sig_summaries)
+
+write.csv(all_summaries, "C:/Users//Results_tables/GLS_model_summaries.csv", row.names = FALSE)
+write.csv(all_sig_summaries, "C:/Users//Results_tables/GLS_model_sig_summaries.csv", row.names = FALSE)
+#################################################
+library(ggplot2)
+library(dplyr)
+library(ggpubr)
+# Define the dependent variables 
+dependent_variables <- list(
+  ABG = "NPP_ABG_Tha_yr",  # Corrected to match the summary model name
+  BG = "NPP_BG_Tha_yr",  # Corrected to match the summary model name
+  Total = "NPPtotal_Tha_yr",
+  SOC = "SOC_Tha"
+)
+
+# Extract significant predictors and their statistics 
+get_model_data <- function(model_name) {
+  all_sig_summaries %>%
+    filter(model == model_name) %>%
+    select(Predictor, Estimate, t.value, p.value)
+}
+
+predictors_ABG <- all_sig_summaries %>% filter(model == "ABG_NPP") %>% pull(Predictor)
+predictors_BG_NPP <- all_sig_summaries %>% filter(model == "BG_NPP") %>% pull(Predictor)
+predictors_NPP <- all_sig_summaries %>% filter(model == "total_NPP") %>% pull(Predictor)
+predictors_SOC <- all_sig_summaries %>% filter(model == "SOC") %>% pull(Predictor)
+
+# Verify results
+print(predictors_ABG)
+print(predictors_BG_NPP)
+print(predictors_NPP)
+print(predictors_SOC)
+##############################################
+colnames(numeric_bamboo)
+##########################################################
+print(all_sig_summaries)
+# map printable variable names for figures
+label_map <- c(
+  "N_px" = "Soil Nitrogen (%)",
+  "Soil_water_vv" = "Soil water (%)",
+  "elevation" = "Elevation (m)",
+  "elevation1" = "Elevation (m)",
+  "annual_rainfall" = "Annual rainfall (mm)",
+  "annual_rainfall1" = "Annual rainfall (mm)",
+  "annual_rainfall2" = "Annual rainfall (mm)",
+  "mean_temp" = "Mean Annual Temp (°C)",
+  "mean_temp1" = "Mean Annual Temp (°C)",
+  "Culm_densityStha" = "Culm density (st ha⁻¹)",
+  "Culm_densityStha1" = "Culm density (st ha⁻¹)",
+  "Culm_densityStha2" = "Culm density (st ha⁻¹)",
+  "Culm_densityStha3" = "Culm density (st ha⁻¹)",
+  "Culmheight_m" = "Culm Height (m)",
+  "Culmheight_m1" = "Culm Height (m)",
+  "Basal_areaM2ha" = "Basal area (m² ha⁻¹)",
+  "Basal_areaM2ha1" = "Basal area (m² ha⁻¹)",
+  "Basal_areaM2ha2" = "Basal area (m² ha⁻¹)",
+  "LitterfallThayr" = "Litterfall (t ha⁻¹ yr⁻¹)",
+  "LitterfallThayr1" = "Litterfall (t ha⁻¹ yr⁻¹)",
+  "RootTha" = "Fine root biomass (t ha⁻¹)",
+  "RootTha1" = "Fine root biomass (t ha⁻¹)",
+  "LitterTCha" = "Litter C (t ha⁻¹ yr⁻¹)",
+  "NPP_ABG_Tha_yr" = "ABG NPP (t ha⁻¹ yr⁻¹)",
+  "NPP_ABG_Tha_yr1" = "ABG NPP (t ha⁻¹ yr⁻¹)",
+  "NPP_ABG_Tha_yr2" = "ABG NPP (t ha⁻¹ yr⁻¹)",
+  "NPPtotal_Tha_yr" = "Total NPP (t ha⁻¹ yr⁻¹)",
+  "NPPtotal_Tha_yr1" = "Total NPP (t ha⁻¹ yr⁻¹)",
+  "NPPtotal_Tha_yr2" = "Total NPP (t ha⁻¹ yr⁻¹)",
+  "SOC_Tha" = "SOC (t ha⁻¹)",
+  "SOC_Tha1" = "SOC (t ha⁻¹)",
+  "SOC_Tha2" = "SOC (t ha⁻¹)",
+  "NPP_BG_Tha_yr" = "BG NPP (t ha⁻¹ yr⁻¹)",
+  "NPP_BG_Tha_yr1" = "BG NPP (t ha⁻¹ yr⁻¹)",
+  "pH" = "pH",
+  "CulmTha" = "Culm biomass (t ha⁻¹ yr⁻¹)",
+  "CulmTha1" = "Culm biomass (t ha⁻¹ yr⁻¹)",
+  "CulmTha2" = "Culm biomass (t ha⁻¹ yr⁻¹)",
+  "BG_biomassTha" = "Belowground biomass (t ha⁻¹)",
+  "BG_biomassTha1" = "Belowground biomass (t ha⁻¹)",
+  "BG_biomassTha2" = "Belowground biomass (t ha⁻¹)",
+  "ABG_biomassTha" = "Aboveground biomass (t ha⁻¹)",
+  "ABG_biomassTha1" = "Aboveground biomass (t ha⁻¹)",
+  "ABG_biomassTha2" = "Aboveground biomass (t ha⁻¹)",
+  "Dead_materialTha" = "Dead BM (t ha⁻¹)",
+  "Dead_materialTha1" = "Dead BM (t ha⁻¹)",
+  "DBHcm" = "DBH (cm)",
+  "DBHcm1" = "DBH (cm)",
+  "DBHcm2" = "DBH (cm)",
+  "RhizomeTha" = "Rhizome biomass (t ha⁻¹)",
+  "RhizomeTha1" = "Rhizome biomass (t ha⁻¹)",
+  "LeavesTha" = "Leaf biomass (t ha⁻¹)",
+  "LeavesTha1" = "Leaf biomass (t ha⁻¹)",
+  "Below_above_NPP_ratio" = "Root:Shoot NPP",
+  "Below_above_NPP_ratio1" = "Root:Shoot NPP",
+  "CulmTha" = "Culm biomass (t ha⁻¹)",
+  "root_rhizome_ratio" = "Root:Rhizome ratio",
+  "Soil_resp_TCO2ha_yr" = "Soil respiration (t CO₂ ha⁻¹ yr⁻¹)",
+  "transpiration" = "Transpiration (mm yr⁻¹)",
+  "TotalSi_kgha" = "Total Si (kg ha⁻¹)"
+)
+
+for (predictor in predictors_ABG) {
+  cat("Label for", predictor, ":", label_map[[predictor]], "\n")
+}
+for (predictor in predictors_ABG) {
+  if (!is.null(label_map[[predictor]])) {
+    cat("Label for", predictor, ":", label_map[[predictor]], "\n")
+  } else {
+    cat("Label for", predictor, ": **MISSING**\n")
+  }
+}
+for (predictor in predictors_ABG) {
+  if (!is.null(label_map[[predictor]])) {
+    cat("Label for", predictor, ":", label_map[[predictor]], "\n")
+  } else {
+    cat("Label for", predictor, ": **MISSING**\n")
+  }
+}
+for (predictor in predictors_BG_NPP) {
+  if (!is.null(label_map[[predictor]])) {
+    cat("Label for", predictor, ":", label_map[[predictor]], "\n")
+  } else {
+    cat("Label for", predictor, ": **MISSING**\n")
+  }
+}
+for (predictor in predictors_SOC) {
+  if (!is.null(label_map[[predictor]])) {
+    cat("Label for", predictor, ":", label_map[[predictor]], "\n")
+  } else {
+    cat("Label for", predictor, ": **MISSING**\n")
+  }
+}
+
+# print figures for each set of variables
+create_scatter_plots_with_regression <- function(data, response, predictors, label_map) {
+  plots <- list()
+  
+  for (predictor in predictors) {
+    response_label <- label_map[[response]]
+    predictor_label <- label_map[[predictor]]
+    
+    # Debug prints to check label retrieval
+    print(paste("Response:", response, "Label:", response_label))
+    print(paste("Predictor:", predictor, "Label:", predictor_label))
+    
+    # Fit GLS model
+    fit <- gls(as.formula(paste(response, "~", predictor)), data = data, correlation = corAR1(), method = "ML")
+    intercept <- coef(fit)[1]
+    slope <- coef(fit)[2]
+    aic_value <- AIC(fit)
+    residual_se <- summary(fit)$sigma
+    phi_value <- coef(fit$modelStruct$corStruct, unconstrained = FALSE)
+    
+    # Construct the multiline annotation string 
+    annotation <- paste0("y = ", formatC(slope, format = "f", digits = 4), "x + ", 
+                         formatC(intercept, format = "f", digits = 4), "\n", 
+                         "AIC = ", formatC(aic_value, format = "f", digits = 1), "\n", 
+                         "s.e. = ", formatC(residual_se, format = "f", digits = 2), "\n",
+                         "φ = ", formatC(phi_value, format = "f", digits = 3))
+    
+    if (is.null(response_label) || is.null(predictor_label)) {
+      stop(paste("Label not found for", response, "or", predictor))
+    }
+    
+    plot <- ggplot(data, aes_string(x = predictor, y = response)) +
+      geom_point(colour = "darkgrey") +
+      geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = TRUE) +
+      theme_bw() +
+      labs(x = predictor_label, y = response_label) +
+      annotate("text", x = 0.95 * max(data[[predictor]], na.rm = TRUE), 
+               y = 0.95 * max(data[[response]], na.rm = TRUE), 
+               label = annotation, hjust = 1, vjust = 1, size = 4, parse = FALSE)
+    
+    plots[[predictor]] <- plot
+  }
+  
+  return(plots)
+}
+
+
+plot_ABG <- create_scatter_plots_with_regression(numeric_data, "NPP_ABG_Tha_yr", predictors_ABG, label_map)
+plot_BG <- create_scatter_plots_with_regression(numeric_data, "NPP_BG_Tha_yr", predictors_BG_NPP, label_map)
+plot_total <- create_scatter_plots_with_regression(numeric_data, "NPPtotal_Tha_yr", predictors_NPP, label_map)
+plot_SOC <- create_scatter_plots_with_regression(numeric_data, "SOC_Tha", predictors_SOC, label_map)
+
+# Create lists from generated plots 
+plots_ABG_list <- lapply(names(plot_ABG), function(predictor) plot_ABG[[predictor]]+ 
+  theme(axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank())) 
+plots_BG_list <- lapply(names(plot_BG), function(predictor) plot_BG[[predictor]]+ 
+  theme(axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank())) 
+plots_total_list <- lapply(names(plot_total), function(predictor) plot_total[[predictor]]+ 
+  theme(axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank())) 
+plots_SOC_list <- lapply(names(plot_SOC), function(predictor) plot_SOC[[predictor]]+ 
+  theme(axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank()))
+print(length(plots_ABG_list)) 
+print(length(plots_BG_list)) 
+print(length(plots_total_list)) 
+print(length(plots_SOC_list))
+
+
+print(predictors_ABG)
+print(predictors_BG_NPP)
+print(predictors_NPP)
+print(predictors_SOC)
+
+
+
+
+custom_labels <- paste0(letters[1:length(plots_ABG_list)], ")")
+arranged_ABG <- ggarrange(plotlist = plots_ABG_list, 
+                          ncol = 3, nrow = 2, 
+                          labels = custom_labels,
+                          label.x = 0.1,  # Adjust the value as needed to move labels to the right
+                          label.y = 0.97)
+custom_labels <- paste0(letters[1:length(plots_BG_list)], ")")
+arranged_BG <- ggarrange(plotlist = plots_BG_list, 
+                         ncol = 2, nrow = 2, 
+                         labels = custom_labels,
+                         label.x = 0.1,  
+                         label.y = 0.97)
+custom_labels <- paste0(letters[1:length(plots_total_list)], ")")
+arranged_total <- ggarrange(plotlist = plots_total_list, 
+                            ncol = 2, nrow = 2, 
+                            labels = custom_labels,
+                            label.x = 0.1,
+                            label.y = 0.97)
+custom_labels <- paste0(letters[1:length(plots_SOC_list)], ")")
+arranged_SOC <- ggarrange(plotlist = plots_SOC_list, 
+                          ncol = 3, nrow = 2, 
+                          labels = custom_labels,
+                          label.x = 0.1,
+                          label.y = 0.97)
+final_ABG <- annotate_figure(arranged_ABG, left = text_grob("ABG NPP (t ha yr⁻¹)", rot = 90, vjust = 1))
+final_BG <- annotate_figure(arranged_BG, left = text_grob("BG NPP (t ha yr⁻¹)", rot = 90, vjust = 1))
+final_total <- annotate_figure(arranged_total, left = text_grob("Total NPP (t ha yr⁻¹)", rot = 90, vjust = 1))
+final_SOC <- annotate_figure(arranged_SOC, left = text_grob("SOC (t ha⁻¹)", rot = 90, vjust = 1))
+
+print(final_ABG)
+print(final_BG)
+print(final_total)
+print(final_SOC)
+
+
+library(nlme)
+
+print(data2)
+###################
+is.factor(data2$VegType)
+colnames(data2)
+
+library(data.table)
+library(knitr)
+# Convert to data.table
+data2_dt <- as.data.table(data2)
+# Calculate Mean and SD for each variable by VegType
+KS_summary_table_dt <- data2_dt[, .(
+  
+  mean_temp_mean = mean(mean_temp, na.rm = TRUE),
+  mean_temp_sd = sd(mean_temp, na.rm = TRUE),
+  annual_rainfall_mean = mean(annual_rainfall, na.rm = TRUE),
+  annual_rainfall_sd = sd(annual_rainfall, na.rm = TRUE),
+  elevation_mean = mean(elevation, na.rm = TRUE),
+  elevation_sd = sd(elevation, na.rm = TRUE),
+  
+  SOC_Tha_mean = mean(SOC_Tha, na.rm = TRUE),
+  SOC_Tha_sd = sd(SOC_Tha, na.rm = TRUE),
+  pH_mean = mean(pH, na.rm = TRUE),
+  pH_sd = sd(pH, na.rm = TRUE),
+  Soil_water_vv_mean = mean(Soil_water_vv, na.rm = TRUE),
+  Soil_water_vv_sd = sd(Soil_water_vv, na.rm = TRUE),
+  N_px_mean = mean(N_px, na.rm = TRUE),
+  N_px_sd = sd(N_px, na.rm = TRUE),
+  
+  Culmheight_m_mean = mean(Culmheight_m, na.rm = TRUE),
+  Culmheight_m_sd = sd(Culmheight_m, na.rm = TRUE),
+  Basal_areaM2ha_mean = mean(Basal_areaM2ha, na.rm = TRUE),
+  Basal_areaM2ha_sd = sd(Basal_areaM2ha, na.rm = TRUE),
+  ABG_biomassTha_mean = mean(ABG_biomassTha, na.rm = TRUE),
+  ABG_biomassTha_sd = sd(ABG_biomassTha, na.rm = TRUE),
+  ABG_C_stock_mean = mean(ABG_C_stock, na.rm = TRUE),
+  ABG_C_stock_sd = sd(ABG_C_stock, na.rm = TRUE),
+  
+  BG_biomassTha_mean = mean(BG_biomassTha, na.rm = TRUE),
+  BG_biomassTha_sd = sd(BG_biomassTha, na.rm = TRUE),
+  BGbiomassTCha_mean = mean(BGbiomassTCha, na.rm = TRUE),
+  BGbiomassTCha_sd = sd(BGbiomassTCha, na.rm = TRUE),
+  
+  LitterfallThayr_mean = mean(LitterfallThayr, na.rm = TRUE),
+  LitterfallThayr_sd = sd(LitterfallThayr, na.rm = TRUE),
+  Dead_materialTha_mean = mean(Dead_materialTha, na.rm = TRUE),
+  Dead_materialTha_sd = sd(Dead_materialTha, na.rm = TRUE),
+  
+  NPPtotal_Tha_yr_mean = mean(NPPtotal_Tha_yr, na.rm = TRUE),
+  NPPtotal_Tha_yr_sd = sd(NPPtotal_Tha_yr, na.rm = TRUE),
+  NPP_ABG_Tha_yr_mean = mean(NPP_ABG_Tha_yr, na.rm = TRUE),
+  NPP_ABG_Tha_yr_sd = sd(NPP_ABG_Tha_yr, na.rm = TRUE),
+  NPP_BG_Tha_yr_mean = mean(NPP_BG_Tha_yr, na.rm = TRUE),
+  NPP_BG_Tha_yr_sd = sd(NPP_BG_Tha_yr, na.rm = TRUE)
+), by = VegType]
+
+print(KS_summary_table_dt)
+# Convert to data.table
+KS_summary_table_dt <- as.data.table(KS_summary_table_dt)
+
+# Transpose table
+KS_summary_table_dt <- melt(KS_summary_table_dt, id.vars = "VegType", variable.name = "Variable")
+
+# Make VegType objects into columns
+KS_summary_table_final <- dcast(KS_summary_table_dt, Variable ~ VegType, value.var = "value")
+
+# Print the final table variable names
+print(KS_summary_table_final)
+
+kable(KS_summary_table_final, format = "markdown")
+KW_means_table <- write.csv(KS_summary_table_final, "C:/Users//Results_tables/KW_means_table.csv")
+
+######
+# Combine means into a table
+library(dplyr)
+cluster_1_data <- data2_dt %>%
+  filter(Cluster == 1)
+cluster_2_data <- data2_dt %>%
+  filter(Cluster == 2)
+cluster_3_data <- data2_dt %>%
+  filter(Cluster == 3)
+
+n_obs_cluster_1 <- nrow(cluster_1_data)
+n_obs_cluster_2 <- nrow(cluster_2_data)
+n_obs_cluster_3 <- nrow(cluster_3_data)
+# Combine counts
+obs_summary <- data.frame(
+  Cluster = c("Cluster 1", "Cluster 2", "Cluster 3"),
+  Observations = c(n_obs_cluster_1, n_obs_cluster_2, n_obs_cluster_3)
+)
+print(obs_summary)
+cluster_1_means <- apply(cluster_1_data[, c("annual_rainfall", "mean_temp")], 2, mean)
+cluster_2_means <- apply(cluster_2_data[, c("annual_rainfall", "mean_temp")], 2, mean)
+cluster_3_means <- apply(cluster_3_data[, c("annual_rainfall", "mean_temp")], 2, mean)
+summary_table_means <- data.frame(
+  Cluster = c("Cluster 1", "Cluster 2", "Cluster 3"),
+  Annual_Rainfall = c(cluster_1_means["annual_rainfall"], cluster_2_means["annual_rainfall"], cluster_3_means["annual_rainfall"]),
+  Mean_Temperature = c(cluster_1_means["mean_temp"], cluster_2_means["mean_temp"], cluster_3_means["mean_temp"])
+)
+
+print(summary_table_means)
+# 
+koppen_climate_types_means <- data.frame(
+  Cluster = summary_table_means$Cluster,
+  Koppen_Type = c("Cfa1", "Cfb", "Cfa2")
+)
+print(koppen_climate_types_means)
+
+# Mapping clusters to Koppen types
+
+
+library(data.table)
+colnames(data3)
+data3 <- as.data.table(data3)
+# here, i want to create a table of means and sd for bamboo variables
+bamboo_summary_table_dt <- data3[, .(
+  
+  mean_temp_mean = mean(mean_temp, na.rm = TRUE),
+  mean_temp_sd = sd(mean_temp, na.rm = TRUE),
+  annual_rainfall_mean = mean(annual_rainfall, na.rm = TRUE),
+  annual_rainfall_sd = sd(annual_rainfall, na.rm = TRUE),
+  elevation_mean = mean(elevation, na.rm = TRUE),
+  elevation_sd = sd(elevation, na.rm = TRUE),
+  
+  SOC_Tha_mean = mean(SOC_Tha, na.rm = TRUE),
+  SOC_Tha_sd = sd(SOC_Tha, na.rm = TRUE),
+  pH_mean = mean(pH, na.rm = TRUE),
+  pH_sd = sd(pH, na.rm = TRUE),
+  Soil_water_vv_mean = mean(Soil_water_vv, na.rm = TRUE),
+  Soil_water_vv_sd = sd(Soil_water_vv, na.rm = TRUE),
+  N_px_mean = mean(N_px, na.rm = TRUE),
+  N_px_sd = sd(N_px, na.rm = TRUE),
+  
+  Culmheight_m_mean = mean(Culmheight_m, na.rm = TRUE),
+  Culmheight_m_sd = sd(Culmheight_m, na.rm = TRUE),
+  
+  Culm_densityStha_mean = mean(Culm_densityStha, na.rm = TRUE),
+  Culm_densityStha_sd = sd(Culm_densityStha, na.rm = TRUE),
+  
+  Basal_areaM2ha_mean = mean(Basal_areaM2ha, na.rm = TRUE),
+  Basal_areaM2ha_sd = sd(Basal_areaM2ha, na.rm = TRUE),
+  DBHcm_mean = mean(DBHcm, na.rm = TRUE),
+  DBHcm_sd = sd(DBHcm, na.rm = TRUE),
+  ABG_biomassTha_mean = mean(ABG_biomassTha, na.rm = TRUE),
+  ABG_biomassTha_sd = sd(ABG_biomassTha, na.rm = TRUE),
+  ABG_C_stock_mean = mean(ABG_C_stock, na.rm = TRUE),
+  ABG_C_stock_sd = sd(ABG_C_stock, na.rm = TRUE),
+  
+  BG_biomassTha_mean = mean(BG_biomassTha, na.rm = TRUE),
+  BG_biomassTha_sd = sd(BG_biomassTha, na.rm = TRUE),
+  BGbiomassTCha_mean = mean(BGbiomassTCha, na.rm = TRUE),
+  BGbiomassTCha_sd = sd(BGbiomassTCha, na.rm = TRUE),
+  
+  RootTha_mean = mean(RootTha, na.rm = TRUE),
+  RootTha_sd = sd(RootTha, na.rm = TRUE),
+  RhizomeTha_mean = mean(RhizomeTha, na.rm = TRUE),
+  RhizomeTha_sd = sd(RhizomeTha, na.rm = TRUE),
+  
+  LitterfallThayr_mean = mean(LitterfallThayr, na.rm = TRUE),
+  LitterfallThayr_sd = sd(LitterfallThayr, na.rm = TRUE),
+  Dead_materialTha_mean = mean(Dead_materialTha, na.rm = TRUE),
+  Dead_materialTha_sd = sd(Dead_materialTha, na.rm = TRUE),
+  Soil_resp_TCO2ha_yr_mean = mean(Soil_resp_TCO2ha_yr),
+  Soil_resp_TCO2ha_yr_sd = sd(Soil_resp_TCO2ha_yr),
+  transpiration_mean = mean(transpiration),
+  transpiration_sd = sd(transpiration),
+  
+  NPPtotal_Tha_yr_mean = mean(NPPtotal_Tha_yr, na.rm = TRUE),
+  NPPtotal_Tha_yr_sd = sd(NPPtotal_Tha_yr, na.rm = TRUE),
+  NPP_ABG_Tha_yr_mean = mean(NPP_ABG_Tha_yr, na.rm = TRUE),
+  NPP_ABG_Tha_yr_sd = sd(NPP_ABG_Tha_yr, na.rm = TRUE),
+  NPP_BG_Tha_yr_mean = mean(NPP_BG_Tha_yr, na.rm = TRUE),
+  NPP_BG_Tha_yr_sd = sd(NPP_BG_Tha_yr, na.rm = TRUE)
+), by = Managed]
+
+print(bamboo_summary_table_dt)
+
+# Transpose table
+bamboo_summary_table_dt <- melt(bamboo_summary_table_dt, id.vars = "Managed", variable.name = "Variable")
+
+# Spread the data so that VegType objects are now columns
+bamboo_summary_table_dt_final <- dcast(bamboo_summary_table_dt, Variable ~ Managed, value.var = "value")
+
+# Print the final table with variable names intact
+print(bamboo_summary_table_dt_final)
+# Create a table and print
+library(knitr)
+kable(bamboo_summary_table_dt_final, format = "markdown")
+bamboo_means_table <- write.csv(bamboo_summary_table_dt_final, "C:/Users//Results_tables/bamboo_means_table.csv")
+
