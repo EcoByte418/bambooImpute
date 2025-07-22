@@ -24,10 +24,10 @@ library(caret)
 library(hydroGOF)
 library(Hmisc)
 # set your filepaths here to run the script
-file_path <- "C:/Users//Lit_review_data.xlsx"
-file_path2 <- "C:/Users//Results_tables/combined_imputed.csv"
-file_path3 <- "C:/Users//Results_tables/bamboo3_no_NAs.csv"
-data_original <-read_excel(file_path, sheet = 'ForR.2')
+file_path <- "C:/Users/..../Raw_data.xlsx"
+file_path2 <- "C:/Users/..../Results_tables/Imputed_data.csv"
+file_path3 <- "C:/Users/..../Results_tables/bamboo3_no_NAs.csv"
+data_original <-read_excel(file_path, sheet = 'ForR.2') # edit for your specific case
 data2 <- read.csv(file_path2, header = T)
 data3 <- read.csv(file_path3, header = T)
 
@@ -235,7 +235,7 @@ for (factor_col in factors) {
   }
 }
 print(test_results)
-write.csv(test_results, "C:/Users//Results_tables/Wilcoxon_results.csv", row.names = F) 
+write.csv(test_results, "C:/Users/...../Results_tables/Wilcoxon_results.csv", row.names = F) 
 
 # Filter to keep only significant pairs (p_value <= 0.05)
 significant_results <- test_results %>% filter(Most_Common_p_value <= 0.05)
@@ -1074,5 +1074,6 @@ print(bamboo_summary_table_dt_final)
 # Create a table and print
 library(knitr)
 kable(bamboo_summary_table_dt_final, format = "markdown")
-bamboo_means_table <- write.csv(bamboo_summary_table_dt_final, "C:/Users//Results_tables/bamboo_means_table.csv")
+bamboo_means_table <- write.csv(bamboo_summary_table_dt_final, "C:/Users/..../Results_tables/bamboo_means_table.csv")
 
+# End
