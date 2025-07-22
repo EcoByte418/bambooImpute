@@ -30,7 +30,7 @@ library(hydroGOF)
 library(caret)
 # to run this model, you must set all of your file paths to extract the correct dataframe and send results
 # data frame and file names retained from original, please use to avoid issues
-file_path <- "C:/Users//Lit_review_data.xlsx"
+file_path <- "C:/Users/...../Raw_data.xlsx" # The initial raw data file in your hard drive.
 data <-read_excel(file_path, sheet = 'ForR.2')
 colnames(data)
 data$Observation <- as.integer(data$Observation)
@@ -454,8 +454,8 @@ imputed_forest2 <- averaged_forest_2
 
 
 
-write.csv(imputed_bamboo2, "C:/Users//Results_tables/imputed_bamboo2.csv", row.names = FALSE)
-write.csv(imputed_forest2, "C:/Users//Results_tables/imputed_forest2.csv", row.names = FALSE)
+write.csv(imputed_bamboo2, "C:/Users/..../Results_tables/imputed_bamboo2.csv", row.names = FALSE)
+write.csv(imputed_forest2, "C:/Users/..../Results_tables/imputed_forest2.csv", row.names = FALSE)
 
 
 
@@ -516,8 +516,8 @@ colnames(averaged_forest_3) <- colnames(forest_3[[1]])
 print(head(averaged_forest_3))
 imputed_forest3 <- averaged_forest_3
 ####################################################################################################
-write.csv(imputed_bamboo3, "C:/Users//Results_tables/imputed_bamboo3.csv", row.names = FALSE)
-write.csv(imputed_forest3, "C:/Users//Results_tables/imputed_forest3.csv", row.names = FALSE)
+write.csv(imputed_bamboo3, "C:/Users/..../Results_tables/imputed_bamboo3.csv", row.names = FALSE)
+write.csv(imputed_forest3, "C:/Users/..../Results_tables/imputed_forest3.csv", row.names = FALSE)
 
 
 
@@ -620,7 +620,7 @@ results_df_forest <- do.call(rbind, lapply(names(results_data_forest), function(
   )
 }))
 
-# Define performance categories. These thresholds are from Forster et al. 2022
+# Define performance categories. These thresholds are from Forster et al. 2022 https://doi.org/10.3390/land11111947
 performance_categories <- list(
   MAE = c(1.9, 2.9, 3.9, 4.0),
   RMSE = c(10, 19, 39, 40),
@@ -693,8 +693,8 @@ summary(imputed_forest3)
 # Remove columns with NA values
 bamboo3_no_NAs <- imputed_bamboo3[, colSums(is.na(imputed_bamboo3)) == 0]
 forest3_no_NAs <- imputed_forest3[, colSums(is.na(imputed_forest3)) == 0]
-write.csv(bamboo3_no_NAs, "C:/Users//Results_tables/bamboo3_no_NAs.csv", row.names = FALSE)
-write.csv(forest3_no_NAs, "C:/Users//Results_tables/forest3_no_NAs.csv", row.names = FALSE)
+write.csv(bamboo3_no_NAs, "C:/Users/..../Results_tables/bamboo3_no_NAs.csv", row.names = FALSE)
+write.csv(forest3_no_NAs, "C:/Users/..../Results_tables/forest3_no_NAs.csv", row.names = FALSE)
 summary(bamboo3_no_NAs)
 summary(forest3_no_NAs)
 
@@ -714,7 +714,7 @@ combined_data <- bind_rows(bamboo_data_common, forest_data_common)
 # View summary to check
 summary(combined_data)
 
-write.csv(combined_data, "C:/Users//Results_tables/combined_imputed.csv", row.names = FALSE)
+write.csv(combined_data, "C:/Users/..../Results_tables/combined_imputed.csv", row.names = FALSE)
 
 
 
@@ -861,4 +861,4 @@ arranged_violin_plots_forest <- ggarrange(plotlist = violin_plots_forest, ncol =
 print(arranged_violin_plots_forest)
 
 #####
-#    mice and supplimentary plots complete. Go to Analysis Script for statistical treatment
+#    mice and supplimentary plots complete. Go to ' Data analysis for bamboo forests' for statistical treatment
